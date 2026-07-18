@@ -395,6 +395,12 @@ pub(crate) fn translate_client_message(role: &str, parts: Vec<adk_core::types::P
             adk_core::types::Part::ServerToolResponse { .. } => {
                 tracing::warn!("dropping unsupported ServerToolResponse part in OpenAI session");
             }
+            adk_core::types::Part::EmbeddedResource { resource } => {
+                tracing::warn!(
+                    "dropping unsupported EmbeddedResource part in OpenAI session: {}",
+                    resource.uri()
+                );
+            }
         }
     }
 
