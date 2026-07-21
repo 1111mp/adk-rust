@@ -7,7 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **adk-core: embedded-resource content part (issue #400).** New
+  `Part::EmbeddedResource` variant carries a complete resource — a source URI
+  plus inline text or binary contents — mirroring the MCP / ACP embedded-resource
+  block. Adds `EmbeddedResource` (untagged `Text` | `Blob`),
+  `TextResourceContents`, `BlobResourceContents`, and the
+  `Content::with_embedded_resource(..)` helper. `BlobResourceContents::new(..)`
+  is a checked constructor that rejects payloads larger than
+  `MAX_INLINE_DATA_SIZE` instead of truncating. The variant is additive: older
+  serialized `Content` values continue to deserialize unchanged, and existing
+  `Part::InlineData` construction sites are untouched.
+- **adk-acp: embedded-resource prompt content.** A new shared `content` module
+  (`block_to_part` / `part_to_block`) maps ACP `ContentBlock`s to `adk_core::Part`
+  in both directions. The server prompt parser and streamer route through it, so
+  `@`-mentioned file context arrives as a `Part::EmbeddedResource` and ADK
+  embedded-resource content streams back as an ACP embedded-resource block. Text
+  resources are preserved verbatim; binary resources are base64-encoded on the
+  wire and decoded to raw bytes internally. The server now advertises the
+  `embedded_context` prompt capability.
+- **adk-acp: usage updates.** The server emits a `SessionUpdate::UsageUpdate`
+  derived from ADK usage metadata (token counts, and cost in USD when reported).
+  Events without usage metadata produce no update, and counts are never
+  fabricated.
+- **adk-acp: richer tool-call updates.** `ToolCallUpdate` now carries the tool
+  result `content`, affected file `locations` (from a reported `path` string or
+  `paths`/`locations` arrays), and a tool `kind` inferred from the tool name,
+  while preserving the existing tool-call identifier correlation between a
+  `ToolCall` and its later `ToolCallUpdate`.
+- **adk-acp: `session/load` with history replay.** The server implements
+  `session/load`: it reactivates a persisted session (validating the supplied
+  `cwd` like `session/resume`), then reads the stored events and replays each
+  user, agent, thought, and tool event as an ordered `session/update`
+  notification in original chronological order before completing the request.
+  The server advertises the `load_session` capability. A load for an unknown
+  session returns a session-not-found error, and a mismatched working directory
+  is rejected rather than reattached.
+- **adk-acp: multimodal prompt content.** The server accepts image and audio
+  prompt content blocks, mapping each to a `Part::InlineData` that preserves the
+  MIME type and decoded bytes, and advertises the corresponding `image` and
+  `audio` prompt capabilities alongside `embedded_context`. Prompt content of a
+  type the server has not advertised is rejected with a descriptive error. The
+  client prompt path now transmits non-text ADK content (embedded-resource,
+  image, audio) as the matching ACP content block rather than dropping it.
+- **adk-acp: server-side permission bridge.** When the ADK Runner pauses on a
+  `ToolConfirmationRequest` during a prompt turn, the server now maps it to an
+  ACP `session/request_permission` request describing the tool and its
+  arguments, awaits the client's outcome, and resumes execution with the mapped
+  decision fed back through `RunConfig::tool_confirmation_decisions`, correlated
+  by function-call id (allow → approve, deny/cancel → deny). The nested request
+  is issued from the spawned prompt task, so the outer prompt response still
+  completes — the earlier concern that the official Rust SDK loses the outer
+  response after a nested request does not reproduce with this pause/resume
+  flow, and the stale limitation note has been removed.
+- **adk-acp: client-direction tool-update and usage fidelity.** The client
+  streaming surface (`OutputChunk`) now surfaces an External_Agent's
+  `ToolCallUpdate` as `OutputChunk::ToolUpdate` (id-correlated, with status,
+  kind, title, extracted content text, and affected file locations) and its
+  `UsageUpdate` as `OutputChunk::Usage` (tokens used/size, plus cost and
+  currency when reported), in addition to the existing text, thought, and
+  tool-call surfaces. Agent message text is surfaced unchanged.
+- **adk-acp: `examples/acp_full_protocol` reference crate.** A new no-API-key,
+  `Runner`-backed `AcpServer` reference example that exercises the full Phase 2
+  server-direction surface in-process. It ships a deterministic `ScriptedAgent`
+  (no LLM) plus a confirmation-gated `delete_file` tool, and a validating test
+  drives the server through the official `agent-client-protocol` SDK over an
+  `Channel::duplex()` transport — covering embedded-resource prompts,
+  image/audio multimodal prompts, the permission bridge (allow/deny), a
+  `session/load` replay-ordering check, and `UsageUpdate` / `ToolCallUpdate`
+  surfacing — so Phase 2 regressions are caught without a subprocess or model
+  credentials.
+- **adk-acp: session modes and configuration options.** A new `SessionControls`
+  provider trait lets an agent declare session modes (e.g. "ask" / "code") and
+  configuration options (selects, toggles), wired through
+  `AcpServerConfigBuilder::session_controls`. The server advertises the declared
+  modes and options — and only those — in `session/new`, `session/load`,
+  `session/resume`, and `session/fork` responses, and implements `session/set_mode`
+  and `session/set_config_option`: a known value is validated, recorded, and
+  echoed back as a `CurrentModeUpdate` / `ConfigOptionUpdate` notification, while
+  an unknown mode, unknown option, or invalid value is rejected and leaves state
+  unchanged. Selections persist in ADK session state (`acp:mode`,
+  `acp:config:<id>`) so they survive load / resume / fork. An agent that declares
+  no controls advertises no modes and no options, preserving capability accuracy.
+- **adk-acp: `session/fork`.** The server implements `session/fork`, branching a
+  persisted session into a new session id whose stored history is a copy of the
+  source's, carrying over the relevant state (`cwd`, additional directories,
+  mode, config) while leaving the source session's persisted history unchanged.
+  A fork for an unknown session returns a session-not-found error. The server
+  advertises the `session.fork` capability.
+- **adk-acp: available-commands and session-info updates.** On session
+  activation (create / load / resume / fork) the server emits a
+  `SessionUpdate::AvailableCommandsUpdate` for any commands the agent's
+  `SessionControls` declares (and none when it declares none), and a
+  `SessionUpdate::SessionInfoUpdate` carrying the session title when one is
+  recorded (`acp:title`, set via `set_session_title`). A `Plan` `SessionUpdate`
+  mapping exists but stays dormant until an ADK plan primitive surfaces plan
+  entries, so no plan update is emitted today.
+
 ## [2.0.0] - 2026-07-16
+
+### Security
+
+- **Dependency advisories resolved.** Bumped `surrealdb` (optional `adk-rag`
+  backend) to 3.2.1, fixing GHSA-cc8f-fcx3-gpjr (high: arbitrary file read via
+  `DEFINE ANALYZER` mapper filter) plus four related medium advisories. Bumped
+  the OpenTelemetry stack (`opentelemetry`, `opentelemetry_sdk`,
+  `opentelemetry-otlp`) from 0.31 to 0.32 and `tracing-opentelemetry` from 0.32
+  to 0.33 in `adk-telemetry` and `adk-auth`, fixing GHSA-w9wp-h8wv-79jx
+  (unbounded memory allocation in W3C Baggage propagation).
 
 ### Changed
 
@@ -197,6 +305,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-runner/adk-agent: workflow agents are resumed at the root across turns**
+  (#419) — in a session that persists across turns, `find_agent_to_run` no
+  longer routes a follow-up user message to a single sub-agent that responded
+  last when that sub-agent lives under a workflow agent (parallel, sequential,
+  loop, conditional). A new `Agent::supports_agent_transfer` hook (default
+  `true`, overridden to `false` by workflow agents) makes the runner resume the
+  workflow root so every sub-agent runs again. Mirrors Google ADK's
+  `_is_transferable_across_agent_tree`.
 - **adk-model: `turn_complete` on tool-call responses** (#401) — `deepseek` and
   `openai_compatible` providers no longer set `turn_complete: true` when a
   response carries tool calls; the turn continues until tool results are

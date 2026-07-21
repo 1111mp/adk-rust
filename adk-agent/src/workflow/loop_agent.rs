@@ -360,6 +360,13 @@ impl Agent for LoopAgent {
         &self.sub_agents
     }
 
+    fn supports_agent_transfer(&self) -> bool {
+        // Deterministic workflow agent: on cross-turn resumption the runner
+        // must restart from this root so every sub-agent runs again, rather
+        // than resuming a single sub-agent that responded last.
+        false
+    }
+
     async fn run(&self, ctx: Arc<dyn InvocationContext>) -> Result<EventStream> {
         let sub_agents = self.sub_agents.clone();
         let max_iterations = self.max_iterations;

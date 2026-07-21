@@ -1,9 +1,12 @@
 //! Maps ADK-Rust events to official ACP v1 session updates.
 
-use adk_core::{Content, Event, Part};
+use std::path::PathBuf;
+
+use adk_core::{Content, Event, Part, UsageMetadata};
 use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, SessionUpdate, TextContent, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields,
+    ContentBlock, ContentChunk, Cost, Plan, PlanEntry, SessionUpdate, TextContent, ToolCall,
+    ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    ToolKind, UsageUpdate,
 };
 
 /// Converts the typed event stream produced by the ADK-Rust Runner into ACP
@@ -14,10 +17,18 @@ pub struct ResponseStreamer;
 impl ResponseStreamer {
     /// Convert one ADK event into zero or more ACP updates while preserving the
     /// order of content parts inside the event.
+    ///
+    /// Content parts are mapped first (message, thought, tool-call lifecycle),
+    /// followed by a single [`SessionUpdate::UsageUpdate`] when the event
+    /// carries usage metadata. Events without usage metadata produce no usage
+    /// update, and reported token counts are never fabricated.
     pub fn map_event(event: &Event) -> Vec<SessionUpdate> {
         let mut updates = Vec::new();
         if let Some(content) = event.content() {
             Self::map_content(content, &mut updates);
+        }
+        if let Some(usage) = &event.llm_response.usage_metadata {
+            updates.push(SessionUpdate::UsageUpdate(map_usage(usage)));
         }
         updates
     }
@@ -35,10 +46,16 @@ impl ResponseStreamer {
                         ContentBlock::Text(TextContent::new(thinking.clone())),
                     )));
                 }
+                Part::EmbeddedResource { .. } => {
+                    if let Some(block) = crate::content::part_to_block(part) {
+                        updates.push(SessionUpdate::AgentMessageChunk(ContentChunk::new(block)));
+                    }
+                }
                 Part::FunctionCall { name, args, id, .. } => {
                     let call_id = id.clone().unwrap_or_else(|| format!("{name}-call"));
                     updates.push(SessionUpdate::ToolCall(
                         ToolCall::new(call_id, name.clone())
+                            .kind(infer_tool_kind(name))
                             .status(ToolCallStatus::InProgress)
                             .raw_input(args.clone()),
                     ));
@@ -46,16 +63,147 @@ impl ResponseStreamer {
                 Part::FunctionResponse { function_response, id } => {
                     let call_id =
                         id.clone().unwrap_or_else(|| format!("{}-call", function_response.name));
-                    updates.push(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-                        call_id,
-                        ToolCallUpdateFields::new()
-                            .status(ToolCallStatus::Completed)
-                            .raw_output(function_response.response.clone()),
-                    )));
+                    let mut fields = ToolCallUpdateFields::new()
+                        .kind(infer_tool_kind(&function_response.name))
+                        .status(ToolCallStatus::Completed)
+                        .raw_output(function_response.response.clone());
+                    let content = tool_result_content(&function_response.response);
+                    if !content.is_empty() {
+                        fields = fields.content(content);
+                    }
+                    let locations = tool_result_locations(&function_response.response);
+                    if !locations.is_empty() {
+                        fields = fields.locations(locations);
+                    }
+                    updates
+                        .push(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call_id, fields)));
                 }
                 _ => {}
             }
         }
+    }
+}
+
+/// Map ADK usage metadata to an ACP [`UsageUpdate`].
+///
+/// `used` reflects the total tokens consumed for the turn (prompt + response),
+/// derived from the reported `total_token_count`. ADK does not report the
+/// model's context-window size, so `size` is left at `0` (unknown) rather than
+/// fabricating a value. Cost is populated only when ADK reports it; ADK cost is
+/// an estimate in USD.
+fn map_usage(usage: &UsageMetadata) -> UsageUpdate {
+    let used = u64::try_from(usage.total_token_count.max(0)).unwrap_or(0);
+    let mut update = UsageUpdate::new(used, 0);
+    if let Some(cost) = usage.cost {
+        update = update.cost(Cost::new(cost, "USD"));
+    }
+    update
+}
+
+/// Render a tool result payload as ACP tool-call content.
+///
+/// A JSON string payload is surfaced verbatim; any other JSON value is rendered
+/// as its compact JSON representation. A `null` or empty payload yields no
+/// content so the update omits the field.
+fn tool_result_content(response: &serde_json::Value) -> Vec<ToolCallContent> {
+    if response.is_null() {
+        return Vec::new();
+    }
+    let text = match response {
+        serde_json::Value::String(value) => value.clone(),
+        other => other.to_string(),
+    };
+    if text.is_empty() {
+        return Vec::new();
+    }
+    vec![ToolCallContent::from(ContentBlock::Text(TextContent::new(text)))]
+}
+
+/// Extract file locations a tool reports affecting from its JSON result.
+///
+/// Recognizes a top-level `path` string, and `paths`/`locations` arrays whose
+/// items are either path strings or objects carrying a `path` string. Anything
+/// else is ignored so no location is fabricated.
+fn tool_result_locations(response: &serde_json::Value) -> Vec<ToolCallLocation> {
+    let mut locations = Vec::new();
+    let serde_json::Value::Object(map) = response else {
+        return locations;
+    };
+    if let Some(serde_json::Value::String(path)) = map.get("path") {
+        locations.push(ToolCallLocation::new(PathBuf::from(path)));
+    }
+    for key in ["paths", "locations"] {
+        let Some(serde_json::Value::Array(items)) = map.get(key) else {
+            continue;
+        };
+        for item in items {
+            match item {
+                serde_json::Value::String(path) => {
+                    locations.push(ToolCallLocation::new(PathBuf::from(path)));
+                }
+                serde_json::Value::Object(obj) => {
+                    if let Some(serde_json::Value::String(path)) = obj.get("path") {
+                        locations.push(ToolCallLocation::new(PathBuf::from(path)));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    locations
+}
+
+/// Map plan entries surfaced by the ADK runtime into an ACP [`SessionUpdate::Plan`].
+///
+/// # Dormant extension point
+///
+/// This helper is **ready but dormant**: ADK has no plan primitive today, so
+/// nothing in the runtime produces plan entries and nothing calls this function
+/// on the live event path. It exists as the single, documented place to plug a
+/// future ADK plan source into the ACP `Plan` `session/update` (Requirement
+/// 11.3), rather than inventing a fake plan source now.
+///
+/// When a future ADK version surfaces plan entries, construct the ACP
+/// [`PlanEntry`] values (each carrying a description, [`PlanEntryPriority`], and
+/// [`PlanEntryStatus`]) and call `map_plan` to obtain the notification to send.
+/// The mapping is pure: it preserves the entries and their order exactly and
+/// performs no I/O.
+///
+/// [`PlanEntry`]: agent_client_protocol::schema::v1::PlanEntry
+/// [`PlanEntryPriority`]: agent_client_protocol::schema::v1::PlanEntryPriority
+/// [`PlanEntryStatus`]: agent_client_protocol::schema::v1::PlanEntryStatus
+pub fn map_plan(entries: Vec<PlanEntry>) -> SessionUpdate {
+    SessionUpdate::Plan(Plan::new(entries))
+}
+
+/// Infer a conservative ACP [`ToolKind`] from a tool name.
+///
+/// ADK's Runner event does not carry a tool's declared read-only/behavior flags
+/// at the point a result is streamed, so the kind is derived from common naming
+/// conventions. Unrecognized names default to [`ToolKind::Other`].
+///
+/// Shared with the permission bridge so a `session/request_permission` request
+/// carries the same tool `kind` a client would see on the corresponding
+/// `ToolCall`/`ToolCallUpdate`.
+pub(crate) fn infer_tool_kind(name: &str) -> ToolKind {
+    let lower = name.to_ascii_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|needle| lower.contains(needle));
+    if has(&["read", "cat", "view", "show", "list", "get"]) {
+        ToolKind::Read
+    } else if has(&["delete", "remove", "unlink"]) {
+        ToolKind::Delete
+    } else if has(&["move", "rename"]) {
+        ToolKind::Move
+    } else if has(&["write", "edit", "update", "create", "patch", "insert", "append"]) {
+        ToolKind::Edit
+    } else if has(&["search", "grep", "find", "query"]) {
+        ToolKind::Search
+    } else if has(&["fetch", "download", "http", "curl"]) {
+        ToolKind::Fetch
+    } else if has(&["exec", "run", "bash", "shell", "command"]) {
+        ToolKind::Execute
+    } else {
+        ToolKind::Other
     }
 }
 
@@ -101,5 +249,225 @@ mod tests {
 
         let updates = ResponseStreamer::map_event(&event);
         assert!(matches!(updates.as_slice(), [SessionUpdate::ToolCallUpdate(_)]));
+    }
+
+    /// **Feature: acp-v1-full-support, Property 5: Usage fidelity**
+    /// *For any* event carrying usage metadata, exactly one `UsageUpdate` is
+    /// emitted reflecting the reported token counts (and cost when present).
+    /// **Validates: Requirements 3.1**
+    #[test]
+    fn emits_usage_update_reflecting_reported_counts() {
+        let mut event = Event::new("inv-usage");
+        event.llm_response.usage_metadata = Some(UsageMetadata {
+            prompt_token_count: 100,
+            candidates_token_count: 50,
+            total_token_count: 150,
+            cost: Some(0.0025),
+            ..Default::default()
+        });
+
+        let updates = ResponseStreamer::map_event(&event);
+        match updates.as_slice() {
+            [SessionUpdate::UsageUpdate(usage)] => {
+                assert_eq!(usage.used, 150);
+                assert_eq!(usage.size, 0);
+                let cost = usage.cost.as_ref().expect("cost present");
+                assert_eq!(cost.currency, "USD");
+                assert!((cost.amount - 0.0025).abs() < f64::EPSILON);
+            }
+            other => panic!("expected a single usage update, got {other:?}"),
+        }
+    }
+
+    /// **Feature: acp-v1-full-support, Property 5: Usage fidelity**
+    /// *For any* event without usage metadata, no `UsageUpdate` is emitted.
+    /// **Validates: Requirements 3.2**
+    #[test]
+    fn emits_no_usage_update_when_metadata_absent() {
+        let mut event = Event::new("inv-none");
+        let mut content = Content::new("model");
+        content.parts.push(Part::Text { text: "hi".into() });
+        event.set_content(content);
+
+        let updates = ResponseStreamer::map_event(&event);
+        assert!(updates.iter().all(|update| !matches!(update, SessionUpdate::UsageUpdate(_))));
+    }
+
+    #[test]
+    fn usage_update_omits_cost_when_absent() {
+        let mut event = Event::new("inv-usage-nocost");
+        event.llm_response.usage_metadata = Some(UsageMetadata {
+            prompt_token_count: 10,
+            candidates_token_count: 5,
+            total_token_count: 15,
+            ..Default::default()
+        });
+
+        let updates = ResponseStreamer::map_event(&event);
+        match updates.as_slice() {
+            [SessionUpdate::UsageUpdate(usage)] => {
+                assert_eq!(usage.used, 15);
+                assert!(usage.cost.is_none());
+            }
+            other => panic!("expected a single usage update, got {other:?}"),
+        }
+    }
+
+    /// **Feature: acp-v1-full-support, Property 6: Tool-call correlation**
+    /// *For any* tool call, its `ToolCall` and later `ToolCallUpdate` share the
+    /// same identifier.
+    /// **Validates: Requirements 4.4**
+    #[test]
+    fn tool_call_and_update_share_the_same_id() {
+        let call_id = "call-xyz";
+
+        let mut call_event = Event::new("inv-corr");
+        let mut call_content = Content::new("model");
+        call_content.parts.push(Part::FunctionCall {
+            name: "read_file".into(),
+            args: serde_json::json!({"path":"src/lib.rs"}),
+            id: Some(call_id.into()),
+            thought_signature: None,
+        });
+        call_event.set_content(call_content);
+
+        let mut result_event = Event::new("inv-corr");
+        let mut result_content = Content::new("function");
+        result_content.parts.push(Part::FunctionResponse {
+            function_response: adk_core::FunctionResponseData::new(
+                "read_file",
+                serde_json::json!({"path":"src/lib.rs","content":"fn main() {}"}),
+            ),
+            id: Some(call_id.into()),
+        });
+        result_event.set_content(result_content);
+
+        let tool_call_id = match ResponseStreamer::map_event(&call_event).as_slice() {
+            [SessionUpdate::ToolCall(call)] => call.tool_call_id.clone(),
+            other => panic!("expected a tool call, got {other:?}"),
+        };
+        let update_id = match ResponseStreamer::map_event(&result_event).as_slice() {
+            [SessionUpdate::ToolCallUpdate(update)] => update.tool_call_id.clone(),
+            other => panic!("expected a tool call update, got {other:?}"),
+        };
+
+        assert_eq!(tool_call_id, update_id);
+    }
+
+    #[test]
+    fn tool_call_update_is_enriched_with_content_locations_and_kind() {
+        let mut event = Event::new("inv-rich");
+        let mut content = Content::new("function");
+        content.parts.push(Part::FunctionResponse {
+            function_response: adk_core::FunctionResponseData::new(
+                "read_file",
+                serde_json::json!({"path":"src/main.rs","content":"fn main() {}"}),
+            ),
+            id: Some("call-1".into()),
+        });
+        event.set_content(content);
+
+        let updates = ResponseStreamer::map_event(&event);
+        match updates.as_slice() {
+            [SessionUpdate::ToolCallUpdate(update)] => {
+                assert_eq!(update.fields.kind, Some(ToolKind::Read));
+                assert!(!update.fields.content.as_ref().expect("content set").is_empty());
+                let locations = update.fields.locations.as_ref().expect("locations set");
+                assert_eq!(locations, &vec![ToolCallLocation::new(PathBuf::from("src/main.rs"))]);
+            }
+            other => panic!("expected an enriched tool call update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extracts_multiple_locations_from_paths_array() {
+        let mut event = Event::new("inv-paths");
+        let mut content = Content::new("function");
+        content.parts.push(Part::FunctionResponse {
+            function_response: adk_core::FunctionResponseData::new(
+                "edit_files",
+                serde_json::json!({"paths":["a.rs","b.rs"]}),
+            ),
+            id: Some("call-2".into()),
+        });
+        event.set_content(content);
+
+        match ResponseStreamer::map_event(&event).as_slice() {
+            [SessionUpdate::ToolCallUpdate(update)] => {
+                let locations = update.fields.locations.as_ref().expect("locations set");
+                assert_eq!(
+                    locations,
+                    &vec![
+                        ToolCallLocation::new(PathBuf::from("a.rs")),
+                        ToolCallLocation::new(PathBuf::from("b.rs")),
+                    ]
+                );
+            }
+            other => panic!("expected a tool call update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn function_call_tool_kind_is_inferred() {
+        let mut event = Event::new("inv-kind");
+        let mut content = Content::new("model");
+        content.parts.push(Part::FunctionCall {
+            name: "write_file".into(),
+            args: serde_json::json!({}),
+            id: Some("c1".into()),
+            thought_signature: None,
+        });
+        event.set_content(content);
+
+        match ResponseStreamer::map_event(&event).as_slice() {
+            [SessionUpdate::ToolCall(call)] => assert_eq!(call.kind, ToolKind::Edit),
+            other => panic!("expected a tool call, got {other:?}"),
+        }
+    }
+
+    /// The dormant `map_plan` extension point purely wraps plan entries into a
+    /// `SessionUpdate::Plan`, preserving the entries and their order. Nothing
+    /// emits it live (ADK has no plan primitive), but the mapping is verified so
+    /// a future plan source can rely on it.
+    ///
+    /// **Validates: Requirements 11.3**
+    #[test]
+    fn map_plan_wraps_entries_preserving_order() {
+        use agent_client_protocol::schema::v1::{PlanEntryPriority, PlanEntryStatus};
+
+        let entries = vec![
+            PlanEntry::new(
+                "Investigate the failing test",
+                PlanEntryPriority::High,
+                PlanEntryStatus::InProgress,
+            ),
+            PlanEntry::new("Write the fix", PlanEntryPriority::Medium, PlanEntryStatus::Pending),
+            PlanEntry::new("Document the change", PlanEntryPriority::Low, PlanEntryStatus::Pending),
+        ];
+
+        match map_plan(entries.clone()) {
+            SessionUpdate::Plan(plan) => assert_eq!(plan.entries, entries),
+            other => panic!("expected a plan update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_plan_of_empty_entries_yields_empty_plan() {
+        match map_plan(Vec::new()) {
+            SessionUpdate::Plan(plan) => assert!(plan.entries.is_empty()),
+            other => panic!("expected a plan update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_kind_inference_covers_common_conventions() {
+        assert_eq!(infer_tool_kind("read_file"), ToolKind::Read);
+        assert_eq!(infer_tool_kind("delete_file"), ToolKind::Delete);
+        assert_eq!(infer_tool_kind("rename_path"), ToolKind::Move);
+        assert_eq!(infer_tool_kind("edit_file"), ToolKind::Edit);
+        assert_eq!(infer_tool_kind("grep_search"), ToolKind::Search);
+        assert_eq!(infer_tool_kind("fetch_url"), ToolKind::Fetch);
+        assert_eq!(infer_tool_kind("run_command"), ToolKind::Execute);
+        assert_eq!(infer_tool_kind("summarize"), ToolKind::Other);
     }
 }

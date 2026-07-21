@@ -1178,17 +1178,40 @@ impl Runner {
         root_agent.clone()
     }
 
-    /// Check if an agent found in session history can be resumed for the next
-    /// user message.
+    /// Check if an agent found in session history can be resumed directly for
+    /// the next user message.
     ///
-    /// This always returns `true` because the transfer-policy enforcement
-    /// (`disallow_transfer_to_parent` / `disallow_transfer_to_peers`) is
+    /// An agent is a valid direct-resumption target only if it *and* every
+    /// ancestor up to the root permit agent transfer
+    /// ([`Agent::supports_agent_transfer`]). A deterministic workflow agent
+    /// (sequential, parallel, loop, conditional) anywhere on that path returns
+    /// `false`, which forces resumption to restart from the workflow root
+    /// rather than a single sub-agent that happened to respond last. This
+    /// mirrors Google ADK's `_is_transferable_across_agent_tree`.
+    ///
+    /// LLM-driven transfer-policy enforcement
+    /// (`disallow_transfer_to_parent` / `disallow_transfer_to_peers`) is still
     /// handled inside `LlmAgent::run()` when it builds the `transfer_to_agent`
-    /// tool's valid-target list. The runner does not need to duplicate that
-    /// check here — it only needs to know whether the agent is a valid
-    /// resumption target, which it always is if it exists in the tree.
-    fn is_transferable(_root_agent: &Arc<dyn Agent>, _agent: &Arc<dyn Agent>) -> bool {
-        true
+    /// tool's valid-target list; this check only governs cross-turn resumption.
+    fn is_transferable(root_agent: &Arc<dyn Agent>, agent: &Arc<dyn Agent>) -> bool {
+        // Walk the tree from the root down to the target. Every agent on that
+        // path (root through target, inclusive) must support transfer for the
+        // target to be a valid direct-resumption point. `Some(true)` = found
+        // and fully transferable, `Some(false)` = found but a workflow agent
+        // sits on the path, `None` = target not present in this subtree.
+        fn path_supports_transfer(current: &Arc<dyn Agent>, target: &str) -> Option<bool> {
+            if current.name() == target {
+                return Some(current.supports_agent_transfer());
+            }
+            for sub in current.sub_agents() {
+                if let Some(sub_ok) = path_supports_transfer(sub, target) {
+                    return Some(current.supports_agent_transfer() && sub_ok);
+                }
+            }
+            None
+        }
+
+        path_supports_transfer(root_agent, agent.name()).unwrap_or(true)
     }
 
     /// Recursively search agent tree for agent with given name

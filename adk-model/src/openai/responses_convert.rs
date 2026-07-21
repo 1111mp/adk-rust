@@ -168,6 +168,45 @@ fn content_to_input_items(content: &Content) -> Vec<InputItem> {
                     items.push(InputItem::Item(item));
                 }
             }
+            Part::EmbeddedResource { resource } => match resource {
+                // Text resource: include the text payload as a message.
+                adk_core::EmbeddedResource::Text(text) => {
+                    let msg_role = match role {
+                        "model" | "assistant" => Role::Assistant,
+                        _ => Role::User,
+                    };
+                    items.push(InputItem::EasyMessage(EasyInputMessage {
+                        role: msg_role,
+                        content: EasyInputContent::Text(text.text.clone()),
+                        ..Default::default()
+                    }));
+                }
+                // Blob resource: treat like inline bytes (image data URI when image/*).
+                adk_core::EmbeddedResource::Blob(blob) => {
+                    if blob.mime_type.as_deref().is_some_and(|m| m.starts_with("image/")) {
+                        let mime_type = blob.mime_type.as_deref().unwrap_or("image/png");
+                        let data_uri = format!(
+                            "data:{mime_type};base64,{}",
+                            attachment::encode_base64(&blob.data)
+                        );
+                        let image_content = InputContent::InputImage(InputImageContent {
+                            image_url: Some(data_uri),
+                            detail: Default::default(),
+                            file_id: None,
+                        });
+                        let msg_role = match role {
+                            "model" | "assistant" => Role::Assistant,
+                            _ => Role::User,
+                        };
+                        items.push(InputItem::EasyMessage(EasyInputMessage {
+                            role: msg_role,
+                            content: EasyInputContent::ContentList(vec![image_content]),
+                            ..Default::default()
+                        }));
+                    }
+                    // Non-image blob resources are not supported by the Responses API; skip.
+                }
+            },
         }
     }
 

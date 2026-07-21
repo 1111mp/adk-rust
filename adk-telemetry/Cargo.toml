@@ -16,10 +16,10 @@ readme = "README.md"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"], optional = true }
-opentelemetry-otlp = { version = "0.31", features = ["metrics", "grpc-tonic"], optional = true }
-tracing-opentelemetry = { version = "0.32", optional = true }
+opentelemetry = { version = "0.32", optional = true }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.32", features = ["metrics", "grpc-tonic"], optional = true }
+tracing-opentelemetry = { version = "0.33", optional = true }
 serde_json = { workspace = true, optional = true }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 

@@ -48,7 +48,7 @@ Autonomous agents that do vertically integrated tasks well, demonstrating:
 | Capability | Status | Implementation |
 |-----------|--------|----------------|
 | Deployment workflows | ✅ | `cargo adk deploy`, composable templates (8 base + 9 addons + 5 enterprise patterns) |
-| Observability | ✅ | `adk-telemetry` (OpenTelemetry 0.31), structured logging, GenAI semantic conventions |
+| Observability | ✅ | `adk-telemetry` (OpenTelemetry 0.32), structured logging, GenAI semantic conventions |
 | Scaling | ✅ | Tokio async runtime, concurrent agent throughput, connection pooling |
 | Secure configuration | ✅ | `adk-auth` (JWT, OAuth2, OIDC, SSO, cloud secret providers), encrypted sessions (AES-256-GCM) |
 | Rollback and release | ✅ | `adk-eval` regression baselines, `adk-bench` regression detection (exit code 2) |
@@ -127,7 +127,7 @@ These capabilities form the foundation and are stable:
 | `adk-bench` | Framework benchmarking, cross-framework comparison, regression CI | ✅ New |
 | `adk-auth` | JWT, OAuth2, OIDC, SSO, RBAC, cloud secret providers | ✅ Stable |
 | `adk-guardrail` | PII redaction, content filtering, validation | ✅ Stable |
-| `adk-telemetry` | OpenTelemetry 0.31, GenAI semantic conventions | ✅ Stable |
+| `adk-telemetry` | OpenTelemetry 0.32, GenAI semantic conventions | ✅ Stable |
 | `adk-browser` | 46 WebDriver tools | ✅ Stable |
 | `adk-audio` | STT/TTS, Deepgram, ONNX models, desktop audio | ✅ Stable |
 | `adk-rag` | Document chunking, embeddings, vector search | ✅ Stable |

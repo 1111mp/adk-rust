@@ -111,6 +111,26 @@ async fn main() -> anyhow::Result<()> {
             OutputChunk::Thought(_) => {}
             OutputChunk::ToolCall { title } => println!("\n[tool started] {title}"),
             OutputChunk::ToolCallComplete { title } => println!("\n[tool completed] {title}"),
+            OutputChunk::ToolUpdate { id, status, kind, title, content, locations } => {
+                let label = title.as_deref().unwrap_or("(untitled)");
+                let status = status.as_deref().unwrap_or("unknown");
+                let kind = kind.as_deref().unwrap_or("-");
+                println!("\n[tool update] {label} (id={id}, kind={kind}, status={status})");
+                if let Some(content) = content {
+                    println!("  {content}");
+                }
+                if !locations.is_empty() {
+                    println!("  locations: {}", locations.join(", "));
+                }
+            }
+            OutputChunk::Usage { used, size, cost, currency } => {
+                print!("\n[usage] {used}/{size} tokens");
+                if let Some(cost) = cost {
+                    let currency = currency.as_deref().unwrap_or("");
+                    print!(" ({cost:.4} {currency})");
+                }
+                println!();
+            }
             OutputChunk::PermissionRequested { title, approved } => {
                 println!(
                     "\n[permission] {title}: {}",

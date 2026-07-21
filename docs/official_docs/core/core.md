@@ -75,8 +75,47 @@ pub enum Part {
     
     // Result of a tool execution
     FunctionResponse { function_response: FunctionResponseData, id: Option<String> },
+    
+    // A complete resource embedded in the message (source URI + inline contents)
+    EmbeddedResource { resource: EmbeddedResource },
 }
 ```
+
+**Embedded resources:**
+
+`Part::EmbeddedResource` carries a complete resource — a source URI plus inline
+text or binary contents — mirroring the MCP / ACP embedded-resource block. This
+lets `@`-mentioned file context round-trip losslessly through session
+persistence and protocol layers such as `adk-acp`.
+
+```rust
+use adk_core::{BlobResourceContents, Content, EmbeddedResource, TextResourceContents};
+
+// Text resource (verbatim UTF-8 payload, never base64-encoded)
+let text = EmbeddedResource::Text(TextResourceContents::new(
+    "file:///src/main.rs",
+    Some("text/x-rust".to_string()),
+    "fn main() {}",
+));
+
+// Binary resource (checked constructor rejects payloads over MAX_INLINE_DATA_SIZE)
+let blob = EmbeddedResource::Blob(BlobResourceContents::new(
+    "file:///logo.png",
+    Some("image/png".to_string()),
+    vec![0x89, 0x50, 0x4E, 0x47],
+)?);
+
+let content = Content::new("user")
+    .with_text("Here is the entry point and the logo:")
+    .with_embedded_resource(text)
+    .with_embedded_resource(blob);
+```
+
+`EmbeddedResource` is an untagged enum with `Text(TextResourceContents)` and
+`Blob(BlobResourceContents)` variants, each carrying a required `uri` and an
+optional `mime_type`. The variant is additive: older serialized `Content`
+values deserialize unchanged, and existing `Part::InlineData` construction sites
+are unaffected.
 
 **Creating Parts Directly:**
 
@@ -137,6 +176,9 @@ for part in &content.parts {
                 function_response.name, 
                 function_response.response
             );
+        }
+        Part::EmbeddedResource { resource } => {
+            println!("Embedded resource: {}", resource.uri());
         }
     }
 }

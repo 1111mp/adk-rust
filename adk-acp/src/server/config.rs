@@ -23,6 +23,7 @@ use adk_core::Agent;
 use adk_session::SessionService;
 
 use super::error::AcpServerError;
+use super::modes::SessionControls;
 
 /// Transport selection for the ACP Server.
 #[derive(Clone, Debug, Default)]
@@ -54,6 +55,12 @@ pub struct AcpServerConfig {
     pub shutdown_timeout: Duration,
     /// Transport configuration.
     pub transport: TransportConfig,
+    /// Optional provider of session modes and configuration options.
+    ///
+    /// When `None` (the default), the server advertises no modes and no
+    /// configuration options, preserving capability accuracy for agents that
+    /// expose no interactive session controls.
+    pub session_controls: Option<Arc<dyn SessionControls>>,
 }
 
 /// Builder for [`AcpServerConfig`] with validation.
@@ -76,6 +83,7 @@ pub struct AcpServerConfigBuilder {
     max_sessions: usize,
     shutdown_timeout: Duration,
     transport: TransportConfig,
+    session_controls: Option<Arc<dyn SessionControls>>,
 }
 
 impl Default for AcpServerConfigBuilder {
@@ -96,6 +104,7 @@ impl AcpServerConfigBuilder {
             max_sessions: 16,
             shutdown_timeout: Duration::from_secs(30),
             transport: TransportConfig::Stdio,
+            session_controls: None,
         }
     }
 
@@ -147,6 +156,14 @@ impl AcpServerConfigBuilder {
         self
     }
 
+    /// Set the provider of session modes and configuration options.
+    ///
+    /// When unset, the server advertises no modes and no configuration options.
+    pub fn session_controls(mut self, controls: Arc<dyn SessionControls>) -> Self {
+        self.session_controls = Some(controls);
+        self
+    }
+
     /// Build the configuration, validating all required fields.
     ///
     /// # Errors
@@ -185,6 +202,7 @@ impl AcpServerConfigBuilder {
             max_sessions: self.max_sessions,
             shutdown_timeout: self.shutdown_timeout,
             transport: self.transport,
+            session_controls: self.session_controls,
         })
     }
 }

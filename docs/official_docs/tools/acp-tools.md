@@ -45,6 +45,7 @@ MCP supplies tools and resources used during that conversation.
 | [`examples/acp_client_host`](../../../examples/acp_client_host) | Streamed client UI, asynchronous permissions, and a workspace-bounded read-only filesystem |
 | [`examples/acp_kiro`](../../../examples/acp_kiro) | Direct delegation, an ACP agent as an ADK tool, persistent sessions, environment configuration, and concurrent cancellation |
 | [`examples/acp_server`](../../../examples/acp_server) | A tool-using ADK-Rust LLM agent exposed to editors through ACP v1 |
+| [`examples/acp_full_protocol`](../../../examples/acp_full_protocol) | In-process, no-API-key `Runner`-backed reference exercising the full Phase 2 server surface (embedded-resource + image/audio prompts, permission bridge, `session/load` replay, usage/tool-call updates) with a validating test |
 
 ---
 

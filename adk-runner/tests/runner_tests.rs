@@ -297,6 +297,75 @@ impl Agent for MockAgentWithSubs {
     }
 }
 
+// Mock workflow agent (parallel/sequential/loop-like) that does not participate
+// in cross-turn transfer — mirrors the real workflow agents' override.
+struct MockWorkflowAgent {
+    name: String,
+    sub_agents: Vec<Arc<dyn Agent>>,
+}
+
+#[async_trait]
+impl Agent for MockWorkflowAgent {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        "Mock workflow agent"
+    }
+
+    fn sub_agents(&self) -> &[Arc<dyn Agent>] {
+        &self.sub_agents
+    }
+
+    fn supports_agent_transfer(&self) -> bool {
+        false
+    }
+
+    async fn run(&self, _ctx: Arc<dyn InvocationContext>) -> Result<EventStream> {
+        Ok(Box::pin(futures::stream::empty()))
+    }
+}
+
+/// Regression test for #419: when a workflow agent's sub-agent responded on a
+/// previous turn, the runner must resume the workflow *root* (so every
+/// sub-agent runs again), not the single sub-agent that responded last.
+#[tokio::test]
+async fn test_find_agent_to_run_resumes_workflow_root_not_subagent() {
+    let technical: Arc<dyn Agent> = Arc::new(MockAgent { name: "technical_analyst".to_string() });
+    let business: Arc<dyn Agent> = Arc::new(MockAgent { name: "business_analyst".to_string() });
+    let ux: Arc<dyn Agent> = Arc::new(MockAgent { name: "ux_analyst".to_string() });
+
+    let root: Arc<dyn Agent> = Arc::new(MockWorkflowAgent {
+        name: "multi_analyst".to_string(),
+        sub_agents: vec![technical, business, ux],
+    });
+
+    // History: a user turn followed by one sub-agent (ux_analyst) responding.
+    let mut events = vec![];
+    let mut user_event = adk_session::Event::new("inv-1");
+    user_event.author = "user".to_string();
+    events.push(user_event);
+    let mut sub_event = adk_session::Event::new("inv-1");
+    sub_event.author = "ux_analyst".to_string();
+    events.push(sub_event);
+
+    let session = MockSession {
+        id: "session1".to_string(),
+        app_name: "test".to_string(),
+        user_id: "user1".to_string(),
+        events: MockEvents { events },
+        state: MockState,
+    };
+
+    let agent = Runner::find_agent_to_run(&root, &session);
+    assert_eq!(
+        agent.name(),
+        "multi_analyst",
+        "workflow root must be resumed, not the last-responding sub-agent"
+    );
+}
+
 struct EchoUserContentAgent;
 
 #[async_trait]

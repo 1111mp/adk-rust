@@ -70,6 +70,21 @@ pub fn adk_parts_to_a2a(
                 data.insert("server_tool_response".to_string(), server_tool_response.clone());
                 Ok(crate::a2a::Part::Data { data, metadata: None })
             }
+            // Embedded resources: text → text part; blob → inline file bytes.
+            Part::EmbeddedResource { resource } => match resource {
+                adk_core::EmbeddedResource::Text(text) => {
+                    Ok(crate::a2a::Part::text(text.text.clone()))
+                }
+                adk_core::EmbeddedResource::Blob(blob) => {
+                    let encoded = general_purpose::STANDARD.encode(&blob.data);
+                    Ok(crate::a2a::Part::file(crate::a2a::FileContent {
+                        name: None,
+                        mime_type: blob.mime_type.clone(),
+                        bytes: Some(encoded),
+                        uri: Some(blob.uri.clone()),
+                    }))
+                }
+            },
         })
         .collect()
 }

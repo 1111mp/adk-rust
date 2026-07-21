@@ -7,14 +7,18 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use adk_core::Content;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    EnvVariable, InitializeRequest, InitializeResponse, McpServer, NewSessionRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    ContentBlock, ContentChunk, EnvVariable, InitializeRequest, InitializeResponse, McpServer,
+    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
-use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, Responder};
+use agent_client_protocol::util::MatchDispatch;
+use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, Responder, SessionMessage};
 use tracing::{debug, info};
 
+use crate::content::content_to_blocks;
 use crate::error::{AcpError, Result};
 use crate::host::{AcpFileSystem, AcpHostHandler, AcpTerminal, capabilities};
 use crate::permissions::{PermissionPolicy, PermissionRequest, outcome_for};
@@ -245,6 +249,177 @@ pub async fn prompt_agent_with_policy(
         .await;
 
     result.map_err(|e| AcpError::Protocol(e.to_string()))
+}
+
+/// Send a single multimodal prompt to an ACP agent and return the response text.
+///
+/// Unlike [`prompt_agent_with_policy`], which sends a single text block, this
+/// transmits every representable [`Part`](adk_core::Part) of the supplied
+/// [`Content`] as its matching ACP [`ContentBlock`] (text, image, audio, and
+/// embedded resources) via [`content_to_blocks`]. Parts with no ACP
+/// representation are skipped rather than dropping the whole prompt, and text is
+/// always preserved.
+///
+/// The agent's streamed text response is collected and returned, mirroring
+/// [`prompt_agent_with_policy`]'s return contract.
+///
+/// # Errors
+///
+/// Returns [`AcpError`] if the content maps to no transmittable blocks, if the
+/// handshake fails, or if the agent reports a protocol error.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use adk_acp::{AcpAgentConfig, PermissionPolicy};
+/// use adk_acp::connection::prompt_agent_content_with_policy;
+/// use adk_core::{Content, Part};
+/// use std::sync::Arc;
+///
+/// let mut content = Content::new("user");
+/// content.parts.push(Part::Text { text: "What is in this image?".into() });
+/// content.parts.push(Part::InlineData { mime_type: "image/png".into(), data: png_bytes });
+///
+/// let config = AcpAgentConfig::new("my-coding-agent --acp");
+/// let response = prompt_agent_content_with_policy(
+///     &config,
+///     &content,
+///     Arc::new(PermissionPolicy::DenyAll),
+/// ).await?;
+/// ```
+pub async fn prompt_agent_content_with_policy(
+    config: &AcpAgentConfig,
+    content: &Content,
+    policy: Arc<PermissionPolicy>,
+) -> Result<String> {
+    let blocks = content_to_blocks(content);
+    if blocks.is_empty() {
+        return Err(AcpError::InvalidConfig(
+            "prompt content contained no transmittable blocks".into(),
+        ));
+    }
+
+    info!(
+        command = %config.command,
+        cwd = %config.working_dir.display(),
+        block_count = blocks.len(),
+        "spawning ACP agent for multimodal prompt"
+    );
+
+    let agent = build_agent(config)?;
+
+    let working_dir = config.working_dir.clone();
+    let mcp_servers = config.mcp_servers.clone();
+    let filesystem = config.filesystem.clone();
+    let terminal = config.terminal.clone();
+    let client_capabilities = capabilities(filesystem.as_ref(), terminal.as_ref());
+    let policy_clone = policy.clone();
+
+    let result: std::result::Result<String, agent_client_protocol::Error> = Client
+        .builder()
+        .on_receive_request(
+            move |request: RequestPermissionRequest,
+                  responder: Responder<RequestPermissionResponse>,
+                  cx: ConnectionTo<Agent>| {
+                let policy = policy_clone.clone();
+                async move {
+                cx.spawn(async move {
+                    let cancellation = responder.cancellation();
+                    let perm_request = PermissionRequest::from_acp(&request);
+                    let decision = tokio::select! {
+                        decision = policy.decide(&perm_request) => decision,
+                        _ = cancellation.cancelled() => {
+                            return responder.respond(RequestPermissionResponse::new(
+                                RequestPermissionOutcome::Cancelled,
+                            ));
+                        }
+                    };
+                    let outcome = outcome_for(&perm_request, &decision);
+                    debug!(title = %perm_request.title, decision = %decision, "ACP permission policy evaluated");
+                    responder.respond(RequestPermissionResponse::new(outcome))
+                })?;
+                Ok(())
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .with_handler(AcpHostHandler::new(filesystem, terminal))
+        .connect_with(agent, move |connection: ConnectionTo<Agent>| async move {
+            let initialization = connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(client_capabilities),
+                )
+                .block_task()
+                .await?;
+            validate_initialization(&initialization, &mcp_servers)?;
+
+            let response_text = connection
+                .build_session_from(
+                    NewSessionRequest::new(&working_dir).mcp_servers(mcp_servers),
+                )
+                .block_task()
+                .run_until(async move |mut session| collect_prompt_blocks(&mut session, blocks).await)
+                .await?;
+
+            Ok(response_text)
+        })
+        .await;
+
+    result.map_err(|e| AcpError::Protocol(e.to_string()))
+}
+
+/// Send a prompt built from explicit content blocks and collect the agent's
+/// streamed text response.
+///
+/// The SDK's [`send_prompt`](agent_client_protocol::ActiveSession::send_prompt)
+/// convenience only carries a single text block, so multimodal prompts send the
+/// [`PromptRequest`] directly over the session connection. Agent message chunks
+/// are drained from the session update channel (a biased select keeps the
+/// channel ahead of the prompt future so no buffered chunk is missed) until the
+/// prompt turn completes.
+async fn collect_prompt_blocks(
+    session: &mut agent_client_protocol::ActiveSession<'_, Agent>,
+    blocks: Vec<ContentBlock>,
+) -> std::result::Result<String, agent_client_protocol::Error> {
+    let connection = session.connection();
+    let session_id = session.session_id().clone();
+    let prompt_future =
+        connection.send_request(PromptRequest::new(session_id, blocks)).block_task();
+    tokio::pin!(prompt_future);
+
+    let mut text = String::new();
+    loop {
+        tokio::select! {
+            biased;
+            update = session.read_update() => {
+                match update? {
+                    SessionMessage::SessionMessage(dispatch) => {
+                        MatchDispatch::new(dispatch)
+                            .if_notification(async |notification: SessionNotification| {
+                                if let SessionUpdate::AgentMessageChunk(ContentChunk {
+                                    content: ContentBlock::Text(text_content),
+                                    ..
+                                }) = notification.update
+                                {
+                                    text.push_str(&text_content.text);
+                                }
+                                Ok(())
+                            })
+                            .await
+                            .otherwise_ignore()?;
+                    }
+                    SessionMessage::StopReason(_) => break,
+                    _ => {}
+                }
+            }
+            result = &mut prompt_future => {
+                result?;
+                break;
+            }
+        }
+    }
+    Ok(text)
 }
 
 pub(crate) fn validate_initialization(

@@ -239,6 +239,14 @@ pub fn content_to_message(content: &Content) -> Message {
             }
             // Server-side tool parts are Gemini-specific; skip for DeepSeek
             Part::ServerToolCall { .. } | Part::ServerToolResponse { .. } => {}
+            // Embedded resources: text → text; blob → inline-bytes text representation.
+            Part::EmbeddedResource { resource } => match resource {
+                adk_core::EmbeddedResource::Text(text) => text_parts.push(text.text.clone()),
+                adk_core::EmbeddedResource::Blob(blob) => {
+                    let mime_type = blob.mime_type.as_deref().unwrap_or("application/octet-stream");
+                    text_parts.push(attachment::inline_attachment_to_text(mime_type, &blob.data));
+                }
+            },
         }
     }
 

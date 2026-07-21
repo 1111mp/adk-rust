@@ -148,7 +148,8 @@ pub use tool::{
 };
 pub use tool_concurrency::{ConcurrencyPermit, ToolConcurrencyManager};
 pub use types::{
-    Content, FileDataPart, FunctionResponseData, InlineDataPart, MAX_INLINE_DATA_SIZE, Part,
+    BlobResourceContents, Content, EmbeddedResource, FileDataPart, FunctionResponseData,
+    InlineDataPart, MAX_INLINE_DATA_SIZE, Part, TextResourceContents,
 };
 
 // Re-export async_trait so the #[tool] macro's generated code can reference it

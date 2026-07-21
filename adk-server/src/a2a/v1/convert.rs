@@ -137,6 +137,20 @@ pub fn adk_part_to_wire(part: &adk_core::Part) -> Result<a2a_protocol_types::Par
             let data = json!({ "server_tool_response": server_tool_response.clone() });
             Ok(a2a_protocol_types::Part::data(data))
         }
+        // Embedded resources: text → text part; blob → base64 raw bytes with media type.
+        adk_core::Part::EmbeddedResource { resource } => match resource {
+            adk_core::EmbeddedResource::Text(text) => {
+                Ok(a2a_protocol_types::Part::text(text.text.clone()))
+            }
+            adk_core::EmbeddedResource::Blob(blob) => {
+                let encoded = general_purpose::STANDARD.encode(&blob.data);
+                let mut part = a2a_protocol_types::Part::raw(encoded);
+                if let Some(mime_type) = &blob.mime_type {
+                    part = part.with_media_type(mime_type.clone());
+                }
+                Ok(part)
+            }
+        },
     }
 }
 

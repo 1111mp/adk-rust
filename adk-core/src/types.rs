@@ -1,3 +1,4 @@
+use crate::error::{AdkError, ErrorCategory, ErrorComponent, Result};
 use serde::{Deserialize, Serialize};
 
 /// Maximum allowed size for inline binary data (10 MB).
@@ -46,6 +47,150 @@ pub struct FileDataPart {
     pub mime_type: String,
     /// URI to the file (URL, gs://, etc.).
     pub file_uri: String,
+}
+
+/// Text contents of an embedded resource.
+///
+/// Carries a source URI, an optional MIME type, and an inline UTF-8 text payload.
+/// Mirrors the MCP / ACP text embedded-resource block. The text is stored and
+/// transmitted verbatim (no base64 encoding).
+///
+/// # Example
+///
+/// ```rust
+/// use adk_core::TextResourceContents;
+///
+/// let contents = TextResourceContents {
+///     uri: "file:///project/src/main.rs".to_string(),
+///     mime_type: Some("text/x-rust".to_string()),
+///     text: "fn main() {}".to_string(),
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextResourceContents {
+    /// Source URI of the resource (e.g., `file:///path`, `https://...`).
+    pub uri: String,
+    /// Optional MIME type of the resource (e.g., "text/x-rust", "text/markdown").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    /// The inline UTF-8 text payload.
+    pub text: String,
+}
+
+impl TextResourceContents {
+    /// Create text resource contents from a URI and text payload.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use adk_core::TextResourceContents;
+    ///
+    /// let contents = TextResourceContents::new("file:///notes.txt", None, "hello");
+    /// assert_eq!(contents.uri, "file:///notes.txt");
+    /// ```
+    pub fn new(uri: impl Into<String>, mime_type: Option<String>, text: impl Into<String>) -> Self {
+        Self { uri: uri.into(), mime_type, text: text.into() }
+    }
+}
+
+/// Binary contents of an embedded resource.
+///
+/// Carries a source URI, an optional MIME type, and a raw binary payload.
+/// Mirrors the MCP / ACP blob embedded-resource block. On the wire the bytes are
+/// base64-encoded by protocol layers, but they are stored here as raw bytes.
+///
+/// Construct via [`BlobResourceContents::new`], which validates the payload
+/// against [`MAX_INLINE_DATA_SIZE`].
+///
+/// # Example
+///
+/// ```rust
+/// use adk_core::BlobResourceContents;
+///
+/// let contents = BlobResourceContents::new(
+///     "file:///logo.png",
+///     Some("image/png".to_string()),
+///     vec![0x89, 0x50, 0x4E, 0x47],
+/// )
+/// .unwrap();
+/// assert_eq!(contents.uri, "file:///logo.png");
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlobResourceContents {
+    /// Source URI of the resource (e.g., `file:///path`, `https://...`).
+    pub uri: String,
+    /// Optional MIME type of the resource (e.g., "image/png", "application/pdf").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    /// Raw binary data.
+    pub data: Vec<u8>,
+}
+
+impl BlobResourceContents {
+    /// Create binary resource contents, validating the payload size.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AdkError`] with category [`ErrorCategory::InvalidInput`] if
+    /// `data` exceeds [`MAX_INLINE_DATA_SIZE`] (10 MB). Unlike the panicking
+    /// `InlineData` helpers, this constructor rejects oversized payloads without
+    /// truncating.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use adk_core::BlobResourceContents;
+    ///
+    /// let ok = BlobResourceContents::new("file:///a.bin", None, vec![1, 2, 3]);
+    /// assert!(ok.is_ok());
+    /// ```
+    pub fn new(uri: impl Into<String>, mime_type: Option<String>, data: Vec<u8>) -> Result<Self> {
+        if data.len() > MAX_INLINE_DATA_SIZE {
+            return Err(AdkError::new(
+                ErrorComponent::Tool,
+                ErrorCategory::InvalidInput,
+                "core.embedded_resource.too_large",
+                format!(
+                    "embedded resource blob size {} exceeds maximum allowed size of {MAX_INLINE_DATA_SIZE} bytes",
+                    data.len(),
+                ),
+            ));
+        }
+        Ok(Self { uri: uri.into(), mime_type, data })
+    }
+}
+
+/// A complete resource embedded in a message: a source URI plus inline text or
+/// binary contents.
+///
+/// Mirrors the MCP / ACP embedded-resource content block. Serialized untagged and
+/// disambiguated by the distinct `text` (for [`Text`](Self::Text)) versus `data`
+/// (for [`Blob`](Self::Blob)) fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EmbeddedResource {
+    /// Text resource contents (verbatim UTF-8 payload).
+    Text(TextResourceContents),
+    /// Binary resource contents (raw bytes; base64-encoded on the wire).
+    Blob(BlobResourceContents),
+}
+
+impl EmbeddedResource {
+    /// Returns the source URI of the embedded resource.
+    pub fn uri(&self) -> &str {
+        match self {
+            EmbeddedResource::Text(t) => &t.uri,
+            EmbeddedResource::Blob(b) => &b.uri,
+        }
+    }
+
+    /// Returns the MIME type of the embedded resource, if present.
+    pub fn mime_type(&self) -> Option<&str> {
+        match self {
+            EmbeddedResource::Text(t) => t.mime_type.as_deref(),
+            EmbeddedResource::Blob(b) => b.mime_type.as_deref(),
+        }
+    }
 }
 
 /// Data for a function (tool) response, including optional multimodal parts.
@@ -270,6 +415,32 @@ pub enum Part {
         /// Opaque JSON payload for the server tool response.
         server_tool_response: serde_json::Value,
     },
+    /// A complete resource embedded in a message: a source URI plus inline text
+    /// or binary contents. Mirrors the MCP / ACP embedded-resource block.
+    ///
+    /// The `resource` key is unique among all `Part` variants, so untagged
+    /// deserialization matches this variant unambiguously. This variant is
+    /// additive: `Content` values serialized before it existed deserialize
+    /// unchanged.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use adk_core::{EmbeddedResource, Part, TextResourceContents};
+    ///
+    /// let part = Part::EmbeddedResource {
+    ///     resource: EmbeddedResource::Text(TextResourceContents::new(
+    ///         "file:///main.rs",
+    ///         Some("text/x-rust".to_string()),
+    ///         "fn main() {}",
+    ///     )),
+    /// };
+    /// assert_eq!(part.embedded_resource().map(EmbeddedResource::uri), Some("file:///main.rs"));
+    /// ```
+    EmbeddedResource {
+        /// The embedded resource (text or binary contents).
+        resource: EmbeddedResource,
+    },
 }
 
 impl Content {
@@ -340,6 +511,24 @@ impl Content {
         self.parts.push(Part::FileData { mime_type: mime_type.into(), file_uri: file_uri.into() });
         self
     }
+
+    /// Add an embedded resource part (a source URI plus inline text or binary
+    /// contents).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use adk_core::{Content, EmbeddedResource, TextResourceContents};
+    ///
+    /// let content = Content::new("user").with_embedded_resource(EmbeddedResource::Text(
+    ///     TextResourceContents::new("file:///readme.md", Some("text/markdown".to_string()), "# Hi"),
+    /// ));
+    /// assert_eq!(content.parts.len(), 1);
+    /// ```
+    pub fn with_embedded_resource(mut self, resource: EmbeddedResource) -> Self {
+        self.parts.push(Part::EmbeddedResource { resource });
+        self
+    }
 }
 
 impl Part {
@@ -384,6 +573,14 @@ impl Part {
     /// Returns true if this part contains media (image, audio, video)
     pub fn is_media(&self) -> bool {
         matches!(self, Part::InlineData { .. } | Part::FileData { .. })
+    }
+
+    /// Returns the embedded resource if this is an `EmbeddedResource` part, None otherwise.
+    pub fn embedded_resource(&self) -> Option<&EmbeddedResource> {
+        match self {
+            Part::EmbeddedResource { resource } => Some(resource),
+            _ => None,
+        }
     }
 
     /// Create a new text part
