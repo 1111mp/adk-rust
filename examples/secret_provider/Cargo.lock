@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "adk-artifact"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-trait",
@@ -14,7 +14,7 @@ dependencies = [
 
 [[package]]
 name = "adk-auth"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-trait",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "adk-core"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "adk-gemini"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-stream",
@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "adk-model"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "adk-gemini",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "adk-plugin"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "serde_json",
@@ -100,7 +100,7 @@ dependencies = [
 
 [[package]]
 name = "adk-runner"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-artifact",
  "adk-core",
@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "adk-rust-macros"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "adk-session"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-trait",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "adk-skill"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "adk-plugin",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "adk-telemetry"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "thiserror",
  "tracing",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "adk-tool"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "adk-rust-macros",

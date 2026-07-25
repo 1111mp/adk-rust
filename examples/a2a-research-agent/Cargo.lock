@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "adk-agent"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "adk-skill",
@@ -49,13 +49,14 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "adk-artifact"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-trait",
@@ -65,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "adk-core"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -80,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "adk-gemini"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-stream",
@@ -106,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "adk-model"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "adk-gemini",
@@ -127,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "adk-plugin"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "serde_json",
@@ -137,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "adk-runner"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-artifact",
  "adk-core",
@@ -158,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "adk-server"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "a2a-protocol-types",
  "adk-agent",
@@ -191,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "adk-session"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-trait",
@@ -204,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "adk-skill"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "adk-core",
  "adk-plugin",
@@ -218,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "adk-telemetry"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "thiserror 2.0.18",
  "tracing",
