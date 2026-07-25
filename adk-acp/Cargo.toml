@@ -29,7 +29,7 @@ futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync", "process", "io-util", "io-std", "macros", "rt"] }
+tokio = { workspace = true, features = ["sync", "process", "io-util", "io-std", "macros", "rt", "time"] }
 tracing = { workspace = true }
 
 # Server-specific dependencies (behind `server` feature)
