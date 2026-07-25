@@ -20,6 +20,7 @@ needed only when exposing an ADK-Rust agent.
 | Product shape | API |
 |---|---|
 | One isolated task with a fresh process | `prompt_agent_with_policy` |
+| One isolated task with non-text (image, audio, resource) content | `prompt_agent_content_with_policy` |
 | A coding specialist available to an LLM agent | `AcpAgentTool` |
 | Several named coding specialists | `AcpToolset` |
 | A continuing project conversation | `AcpSession` |
@@ -45,6 +46,35 @@ let answer = prompt_agent_with_policy(
 
 `DenyAll` is the default because a spawned coding agent can request operations
 with real side effects. Use `AutoApprove` only inside a trusted local workflow.
+
+## Send rich prompt content
+
+`prompt_agent_content_with_policy` transmits a full `adk_core::Content` value —
+not just a string — so a prompt can carry non-text content. Embedded-resource,
+image, and audio parts are mapped to the matching ACP content block through the
+shared content module rather than being dropped; text is always preserved. Parts
+that have no transmittable ACP representation are skipped, and a prompt that maps
+to no blocks at all is rejected.
+
+```rust,ignore
+use adk_acp::{AcpAgentConfig, PermissionPolicy};
+use adk_acp::connection::prompt_agent_content_with_policy;
+use adk_core::{Content, Part};
+use std::sync::Arc;
+
+let mut content = Content::new("user");
+content.parts.push(Part::Text { text: "What is in this image?".into() });
+content.parts.push(Part::InlineData { mime_type: "image/png".into(), data: png_bytes });
+
+let config = AcpAgentConfig::new("my-coding-agent --acp")
+    .working_dir("/absolute/path/to/project");
+
+let answer = prompt_agent_content_with_policy(
+    &config,
+    &content,
+    Arc::new(PermissionPolicy::DenyAll),
+).await?;
+```
 
 ## Delegate from an ADK agent
 
@@ -108,9 +138,20 @@ the same session accept another prompt without a stale response in its queue.
 ## Stream a turn into a UI
 
 `stream_prompt` yields `OutputChunk` values for agent text, thoughts, tool
-starts, permission decisions, completion, and errors. The application may hide
-thought chunks, render tool activity separately, and expose the shared
-`StatusTracker` in its interface.
+starts, permission decisions, completion, and errors. Beyond those, it surfaces
+two richer views of an External_Agent's turn:
+
+- `OutputChunk::ToolUpdate` — the External_Agent's `ToolCallUpdate`, correlated
+  by tool-call `id`, carrying the reported status, kind, updated title,
+  extracted content text, and affected file locations. This lets a UI render
+  tool progress, diffs, and affected-file lists rather than only the final text.
+- `OutputChunk::Usage` — the External_Agent's `UsageUpdate`, carrying tokens
+  `used` and context-window `size`, plus the cumulative `cost` and `currency`
+  when the agent reports them, so a UI can display context-window consumption.
+
+Agent message text is surfaced exactly as before, so a UI that only reads text
+chunks is unaffected. The application may hide thought chunks, render tool
+activity separately, and expose the shared `StatusTracker` in its interface.
 
 See the runnable [`acp_client_host`](../../../examples/acp_client_host) crate for
 the complete loop.

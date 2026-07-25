@@ -54,6 +54,7 @@
 #![warn(missing_docs)]
 
 pub mod connection;
+pub mod content;
 pub mod error;
 pub mod host;
 pub mod permissions;
@@ -70,7 +71,9 @@ pub mod usage;
 #[cfg(feature = "server")]
 pub mod server;
 
-pub use connection::{AcpAgentConfig, prompt_agent, prompt_agent_with_policy};
+pub use connection::{
+    AcpAgentConfig, prompt_agent, prompt_agent_content_with_policy, prompt_agent_with_policy,
+};
 pub use error::{AcpError, Result};
 pub use host::{AcpFileSystem, AcpTerminal};
 pub use permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};

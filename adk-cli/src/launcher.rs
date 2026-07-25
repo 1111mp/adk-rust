@@ -694,6 +694,26 @@ impl StreamPrinter {
                 print!("\n[server-tool-response] {}B\n", server_tool_response.to_string().len());
                 let _ = io::stdout().flush();
             }
+            Part::EmbeddedResource { resource } => {
+                self.flush_pending_thinking();
+                match resource {
+                    adk_core::EmbeddedResource::Text(text) => {
+                        print!(
+                            "\n[embedded-resource] uri={} text-len={}\n",
+                            text.uri,
+                            text.text.len()
+                        );
+                    }
+                    adk_core::EmbeddedResource::Blob(blob) => {
+                        print!(
+                            "\n[embedded-resource] uri={} bytes={}\n",
+                            blob.uri,
+                            blob.data.len()
+                        );
+                    }
+                }
+                let _ = io::stdout().flush();
+            }
         }
     }
 

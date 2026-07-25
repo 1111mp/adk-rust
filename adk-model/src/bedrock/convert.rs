@@ -208,6 +208,42 @@ fn adk_parts_to_bedrock(parts: &[Part]) -> Vec<ContentBlock> {
             }
             // Server-side tool parts are Gemini-specific; skip for Bedrock
             Part::ServerToolCall { .. } | Part::ServerToolResponse { .. } => None,
+            // Embedded resources: text → text block; blob → inline image/document bytes.
+            Part::EmbeddedResource { resource } => match resource {
+                adk_core::EmbeddedResource::Text(text) => {
+                    if text.text.is_empty() {
+                        None
+                    } else {
+                        Some(ContentBlock::Text(text.text.clone()))
+                    }
+                }
+                adk_core::EmbeddedResource::Blob(blob) => {
+                    let mime_type = blob.mime_type.as_deref().unwrap_or("application/octet-stream");
+                    if let Some(fmt) = mime_to_bedrock_image_format(mime_type) {
+                        let source =
+                            ImageSource::Bytes(aws_smithy_types::Blob::new(blob.data.as_slice()));
+                        ImageBlock::builder()
+                            .format(fmt)
+                            .source(source)
+                            .build()
+                            .ok()
+                            .map(ContentBlock::Image)
+                    } else if let Some(fmt) = mime_to_bedrock_document_format(mime_type) {
+                        let source = DocumentSource::Bytes(aws_smithy_types::Blob::new(
+                            blob.data.as_slice(),
+                        ));
+                        DocumentBlock::builder()
+                            .format(fmt)
+                            .name("document")
+                            .source(source)
+                            .build()
+                            .ok()
+                            .map(ContentBlock::Document)
+                    } else {
+                        None
+                    }
+                }
+            },
         })
         .collect()
 }

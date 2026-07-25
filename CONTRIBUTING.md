@@ -202,7 +202,7 @@ adk-graph/         Graph-based workflow orchestration with checkpoints, durable 
 adk-realtime/      Real-time bidirectional audio/voice agents (OpenAI, Gemini Live, LiveKit)
 adk-browser/       Browser automation tools via WebDriver
 adk-eval/          Agent evaluation framework (trajectory, semantic, rubric, LLM-judge)
-adk-telemetry/     OpenTelemetry 0.31 integration for agent observability
+adk-telemetry/     OpenTelemetry 0.32 integration for agent observability
 adk-guardrail/     Input/output guardrails for agent safety
 adk-auth/          Authentication: API keys, JWT, OAuth2, OIDC, SSO
 adk-plugin/        Plugin system for agent lifecycle hooks

@@ -133,10 +133,25 @@ The server implements:
 
 - `initialize` with implementation metadata and exact capability negotiation;
 - `session/new` with absolute `cwd` and additional workspace roots;
-- `session/prompt` with required text and resource-link content;
-- live `session/update` notifications for text, thoughts, tool starts, and tool
-  completion;
+- `session/prompt` with text, resource-link, embedded-resource, image, and
+  audio content;
+- `session/load` with chronological history replay: a persisted session is
+  reactivated (validating `cwd`) and its stored user, agent, thought, and tool
+  events are replayed as ordered `session/update` notifications before the
+  request completes;
+- live `session/update` notifications for text, thoughts, tool starts, tool
+  completion, embedded-resource content, and token-usage updates;
 - `session/cancel` plus SDK-level `$/cancel_request` handling;
+- `session/request_permission` bridging: an agent tool-confirmation pause is
+  turned into a native ACP permission request and the client's outcome resumes
+  the turn (allow → approve, deny/cancel → deny), correlated by function-call id;
+- `session/fork`: branch a persisted session into a new session id whose history
+  is a copy of the source's, leaving the source unchanged;
+- `session/set_mode` and `session/set_config_option`: change the current session
+  mode or a configuration value when the agent declares them through a
+  `SessionControls` provider, validated against the advertised set and echoed as
+  a `CurrentModeUpdate` / `ConfigOptionUpdate`; the selection persists across
+  load / resume / fork;
 - `session/close`, `session/resume`, `session/list`, and `session/delete`;
 - client-supplied stdio MCP servers, started per session and exposed to
   LlmAgent and CodeActAgent through invocation-scoped toolsets;
@@ -144,11 +159,76 @@ The server implements:
 - concurrent-session limits and one active prompt per session.
 
 ACP v1 requires every agent to accept stdio MCP configuration, so no capability
-flag is needed for it. The server does not advertise optional HTTP or SSE MCP,
-image, audio, or embedded-context support. MCP startup has a bounded timeout,
-session capacity is reserved before a process starts, duplicate names and
-environment entries are rejected, and close, delete, and shutdown cancel the
-session-owned MCP services.
+flag is needed for it. The server advertises `load_session`, the
+`embedded_context`, `image`, and `audio` prompt capabilities (because it accepts
+embedded-resource, image, and audio prompt content), and the session lifecycle
+capabilities (`list`, `delete`, `resume`, `close`, `fork`,
+`additional_directories`). Session modes and configuration options are advertised
+only when the agent supplies a `SessionControls` provider — an agent without one
+advertises no modes and no options, so advertised capabilities always match what
+the server implements. It does not advertise optional HTTP or SSE MCP support.
+MCP startup has a bounded timeout, session capacity is reserved before a process
+starts, duplicate names and environment entries are rejected, and close, delete,
+and shutdown cancel the session-owned MCP services.
+
+### Session modes, configuration options, and commands
+
+An agent opts into interactive session controls by supplying a `SessionControls`
+provider (`AcpServerConfigBuilder::session_controls`). The provider declares:
+
+- **modes** — a `SessionModeState` (available modes plus the current one), such
+  as "ask" versus "code". `session/set_mode` validates the id against the
+  advertised set, records it, and emits a `CurrentModeUpdate`; an unknown id is
+  rejected and leaves the mode unchanged.
+- **configuration options** — selects and toggles. `session/set_config_option`
+  validates the value against the option's declared choices, records it, and
+  emits a `ConfigOptionUpdate`; an unknown option or invalid value is rejected.
+- **commands** — ACP slash-commands surfaced as an `AvailableCommandsUpdate` when
+  a session becomes active (create / load / resume / fork).
+
+Selections persist in ADK session state (`acp:mode`, `acp:config:<id>`), so they
+survive load / resume / fork. A recorded session title (`acp:title`, set via
+`set_session_title`) is surfaced as a `SessionInfoUpdate` on activation and
+whenever it changes. A `Plan` `SessionUpdate` mapping exists but stays dormant
+until an ADK plan primitive surfaces plan entries.
+
+### Content mapping and streaming fidelity
+
+A shared `content` module owns the `ContentBlock` ↔ `adk_core::Part` mapping in
+both directions, so the server prompt parser, the server streamer, and the
+client share one implementation:
+
+- embedded-resource prompt content maps to `Part::EmbeddedResource`, preserving
+  the source URI, optional MIME type, and text or binary contents. Text
+  resources are preserved verbatim; binary resources are base64-encoded on the
+  wire and decoded to raw bytes internally. ADK embedded-resource content
+  streams back to the client as an ACP embedded-resource block.
+- image and audio prompt content maps to `Part::InlineData`, preserving the MIME
+  type and decoded bytes. The client prompt path also transmits non-text ADK
+  content (embedded-resource, image, audio) as the matching ACP block instead of
+  dropping it.
+- `UsageUpdate` notifications are emitted from ADK usage metadata (token counts,
+  plus cost in USD when reported). Nothing is emitted when an event carries no
+  usage metadata, and counts are never fabricated.
+- `ToolCallUpdate` notifications include the tool result content, the affected
+  file locations, and a tool `kind` inferred from the tool name, while
+  preserving the identifier correlation between a `ToolCall` and its later
+  `ToolCallUpdate`.
+
+### Client streaming surface
+
+`stream_prompt` yields `OutputChunk` values as they arrive from an
+External_Agent. Beyond agent text (`Text`), reasoning (`Thought`), tool starts
+(`ToolCall`), permission decisions, completion, and errors, the client surfaces:
+
+- `OutputChunk::ToolUpdate` — an External_Agent's `ToolCallUpdate`, correlated
+  by tool-call `id`, carrying the reported status, kind, updated title,
+  extracted content text, and affected file locations.
+- `OutputChunk::Usage` — an External_Agent's `UsageUpdate`, carrying tokens
+  `used`/`size` and, when reported, the cumulative `cost` and `currency`.
+
+Agent message text is surfaced exactly as before, so existing text consumers see
+no change.
 
 ## Verified protocol flow
 
@@ -203,12 +283,16 @@ cargo check --manifest-path examples/acp_server/Cargo.toml
   the coding agent must not access the rest of the machine.
 - A persistent `SessionService` preserves ACP conversations across process
   restarts. `InMemorySessionService` is suitable for local editor use and tests.
-- ADK-Rust now has an async ToolConfirmationHandler that can resolve a tool
-  call inside one invocation. The ACP server does not yet attach it to
-  session/request_permission: the current official Rust SDK loses the outer
-  prompt response after this nested bidirectional request in the in-memory
-  interoperability test. The attempted bridge was removed rather than shipping
-  a path that can hang an editor.
+- The ACP server bridges ADK tool confirmations to native ACP permission
+  requests. When the agent pauses on a `ToolConfirmationRequest`, the server
+  sends a `session/request_permission` to the client, awaits the outcome, and
+  resumes the turn with the mapped decision (allow → approve, deny/cancel →
+  deny), correlated to the tool call by its function-call id. The nested
+  request is issued from the spawned prompt task, so the outer prompt response
+  still completes — an earlier concern that the official Rust SDK loses the
+  outer prompt response after a nested bidirectional request does not reproduce
+  with this pause/resume flow (covered by the in-memory interoperability
+  tests).
 
 ## Runnable examples
 
@@ -217,6 +301,7 @@ cargo check --manifest-path examples/acp_server/Cargo.toml
 | [`acp_client_host`](../examples/acp_client_host) | A vendor-neutral ACP client with streamed events, a read-only filesystem host, and an async permission policy |
 | [`acp_kiro`](../examples/acp_kiro) | Direct, delegated, persistent-session, environment, and cancellation flows against a real external coding agent |
 | [`acp_server`](../examples/acp_server) | A real ADK-Rust LLM agent exposed to editors and other ACP clients through the official server SDK |
+| [`acp_full_protocol`](../examples/acp_full_protocol) | In-process, no-API-key `Runner`-backed reference exercising the full Phase 2 server surface (embedded-resource + image/audio prompts, permission bridge, `session/load` replay, usage/tool-call updates) with a validating test |
 
 Read the [official ADK-Rust ACP guide](../docs/official_docs/acp/index.md) for
 architecture, client and server design choices, deployment boundaries, and the

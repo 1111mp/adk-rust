@@ -22,6 +22,23 @@ pub trait Agent: Send + Sync {
     /// Returns the child agents managed by this agent.
     fn sub_agents(&self) -> &[Arc<dyn Agent>];
 
+    /// Whether this agent participates in LLM-driven agent transfer and may be
+    /// resumed directly across conversation turns.
+    ///
+    /// When a session persists across turns, the runner inspects history to
+    /// decide which agent should handle the next user message. LLM-based and
+    /// custom agents return the default `true`, so the runner can hand a new
+    /// turn back to whichever agent responded last.
+    ///
+    /// Deterministic workflow agents (sequential, parallel, loop, conditional)
+    /// override this to return `false`. Their sub-agents must not be resumed
+    /// individually: doing so would skip the workflow's other sub-agents on
+    /// subsequent turns. Returning `false` makes the runner resume the workflow
+    /// root instead, so every sub-agent runs again on each turn.
+    fn supports_agent_transfer(&self) -> bool {
+        true
+    }
+
     /// Executes the agent and returns a stream of events.
     async fn run(&self, ctx: Arc<dyn InvocationContext>) -> Result<EventStream>;
 }

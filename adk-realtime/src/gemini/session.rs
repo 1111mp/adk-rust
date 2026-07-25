@@ -952,6 +952,12 @@ pub(crate) fn translate_client_message(
             adk_core::types::Part::ServerToolResponse { .. } => {
                 tracing::warn!("Dropping unsupported ServerToolResponse part in Gemini session");
             }
+            adk_core::types::Part::EmbeddedResource { resource } => {
+                tracing::warn!(
+                    "Dropping unsupported EmbeddedResource part in Gemini session: {}",
+                    resource.uri()
+                );
+            }
         }
     }
 

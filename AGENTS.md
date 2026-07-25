@@ -133,7 +133,7 @@ adk-eval/        Evaluation framework: trajectory, semantic, rubric, LLM-judge, 
                  baselines, JUnit XML CI output, human annotation workflows (JSONL), A/B agent
                  comparison (Wilcoxon), auto-generated test cases, multi-turn conversation
                  metrics. Feature-gated: embedding, ci-helpers, statistics.
-adk-telemetry/   OpenTelemetry 0.31 integration for agent observability
+adk-telemetry/   OpenTelemetry 0.32 integration for agent observability
 adk-guardrail/   Input/output guardrails: validation, content filtering, PII redaction
 adk-auth/        Authentication: API keys, JWT, OAuth2, OIDC, SSO, cloud secret providers
                  (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager)

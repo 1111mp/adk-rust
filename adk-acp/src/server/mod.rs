@@ -35,6 +35,8 @@ pub mod capabilities;
 pub mod config;
 pub mod error;
 pub mod handler;
+pub mod modes;
+pub mod permission;
 pub mod streamer;
 pub mod transport;
 
@@ -51,6 +53,7 @@ pub use capabilities::{AgentCapabilities, CapabilitiesBuilder};
 pub use config::{AcpServerConfig, AcpServerConfigBuilder, TransportConfig};
 pub use error::{AcpServerError, ErrorResponse};
 pub use handler::AcpSessionHandler;
+pub use modes::{SessionControls, config_state_key};
 pub use streamer::ResponseStreamer;
 pub use transport::{StdioTransport, Transport};
 

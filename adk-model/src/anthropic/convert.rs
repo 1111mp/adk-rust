@@ -145,6 +145,50 @@ pub fn content_to_message(
                 .ok()
                 .map(ContentBlock::WebSearchToolResult)
             }
+            // Embedded resources: text → text block; blob → inline bytes handling.
+            Part::EmbeddedResource { resource } => match resource {
+                adk_core::EmbeddedResource::Text(text) => {
+                    if text.text.is_empty() {
+                        None
+                    } else {
+                        Some(ContentBlock::Text(TextBlock::new(text.text.clone())))
+                    }
+                }
+                adk_core::EmbeddedResource::Blob(blob) => {
+                    let mime_type = blob.mime_type.as_deref().unwrap_or("application/octet-stream");
+                    let media_type = match mime_type {
+                        "image/jpeg" => Some(ImageMediaType::Jpeg),
+                        "image/png" => Some(ImageMediaType::Png),
+                        "image/gif" => Some(ImageMediaType::Gif),
+                        "image/webp" => Some(ImageMediaType::Webp),
+                        _ => None,
+                    };
+                    if let Some(media_type) = media_type {
+                        let encoded = attachment::encode_base64(&blob.data);
+                        Some(ContentBlock::Image(ImageBlock::new_with_base64(
+                            Base64ImageSource::new(encoded, media_type),
+                        )))
+                    } else if mime_type == "application/pdf" {
+                        let encoded = attachment::encode_base64(&blob.data);
+                        Some(ContentBlock::Document(DocumentBlock::new_with_base64_pdf(
+                            Base64PdfSource::new(encoded),
+                        )))
+                    } else if mime_type.starts_with("text/") {
+                        match String::from_utf8(blob.data.clone()) {
+                            Ok(text) => Some(ContentBlock::Document(
+                                DocumentBlock::new_with_plain_text(PlainTextSource::new(text)),
+                            )),
+                            Err(_) => Some(ContentBlock::Text(TextBlock::new(
+                                attachment::inline_attachment_to_text(mime_type, &blob.data),
+                            ))),
+                        }
+                    } else {
+                        Some(ContentBlock::Text(TextBlock::new(
+                            attachment::inline_attachment_to_text(mime_type, &blob.data),
+                        )))
+                    }
+                }
+            },
         })
         .collect();
 
