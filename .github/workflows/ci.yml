@@ -114,7 +114,7 @@ jobs:
       run: CI=true devenv shell ws-test-ci | tee test.log
 
     - name: Generate computer-use v8 ADK evaluation receipt
-      run: node scripts/generate-computer-use-v8-evidence.mjs --subject-version "${COMPUTER_USE_MCP_V8_VERSION}" --output adk-computer-use-v8-evidence.json --compact
+      run: CI=true devenv shell node scripts/generate-computer-use-v8-evidence.mjs --subject-version "${COMPUTER_USE_MCP_V8_VERSION}" --output adk-computer-use-v8-evidence.json --compact
       env:
         COMPUTER_USE_MCP_V8_VERSION: "7.0.0"
 
