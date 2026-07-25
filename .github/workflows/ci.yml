@@ -150,6 +150,7 @@ jobs:
       matrix:
         include:
           - { package: adk-agent, features: codeact }
+          - { package: adk-model, features: openrouter }
     steps:
     - uses: actions/checkout@v4
 

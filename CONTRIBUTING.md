@@ -326,6 +326,7 @@ name is the job name (matrix jobs include the matrix value in parentheses):
 | `clippy` | `ci.yml` | `clippy` |
 | `test` | `ci.yml` | `test` |
 | `feature-coverage (adk-agent, codeact)` | `ci.yml` | `feature-coverage` (matrix) |
+| `feature-coverage (adk-model, openrouter)` | `ci.yml` | `feature-coverage` (matrix) |
 | `docs` | `ci.yml` | `docs` |
 | `templates` | `ci.yml` | `templates` |
 | `macos` | `ci.yml` | `macos` (compile-only build) |
@@ -334,8 +335,9 @@ name is the job name (matrix jobs include the matrix value in parentheses):
 
 Notes:
 - `feature-coverage` is a matrix job; its context includes the matrix value, so
-  add each entry that exists. Today the only entry is `adk-agent, codeact`. If you
-  append matrix entries, add their contexts here and to branch protection.
+  add each entry that exists. Today the entries are `adk-agent, codeact` and
+  `adk-model, openrouter`. If you append matrix entries, add their contexts here
+  and to branch protection.
 - `semver` is a single job that runs the strict stable-crate check (which can fail
   the job) and a warn-only beta/experimental check (which never fails). Requiring
   the `semver` job therefore requires only the stable-tier semver gate, keeping the
@@ -374,6 +376,7 @@ gh api -X PUT repos/zavora-ai/adk-rust/branches/main/protection \
       { "context": "clippy" },
       { "context": "test" },
       { "context": "feature-coverage (adk-agent, codeact)" },
+      { "context": "feature-coverage (adk-model, openrouter)" },
       { "context": "docs" },
       { "context": "templates" },
       { "context": "macos" },
