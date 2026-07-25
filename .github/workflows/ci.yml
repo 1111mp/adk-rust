@@ -151,6 +151,8 @@ jobs:
         include:
           - { package: adk-agent, features: codeact }
           - { package: adk-model, features: openrouter }
+          - { package: adk-sandbox, features: wasm }
+          - { package: adk-audio, features: fx }
     steps:
     - uses: actions/checkout@v7
 
