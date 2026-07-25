@@ -148,6 +148,10 @@ harness = false
 name = "audio_payload_allocations"
 harness = false
 
+[[bench]]
+name = "audio_boundary_decode"
+harness = false
+
 [features]
 default = []
 # Enable ADK services integration (sessions, memory, plugins)
