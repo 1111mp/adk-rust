@@ -989,6 +989,8 @@ async fn run_deploy(
 
     // ── Upload secrets from .env ────────────────────────────────
     let declared_secrets: Vec<&str> = manifest.secrets.iter().map(|s| s.key.as_str()).collect();
+    // Only the count is ever surfaced to the console — never a key name or value.
+    let declared_count = declared_secrets.len();
     if !declared_secrets.is_empty() {
         let env_path = Path::new(".env");
         if env_path.exists() {
@@ -1031,19 +1033,13 @@ async fn run_deploy(
                 }
             }
             if uploaded == 0 && !stream_output {
-                println!(
-                    "  No matching secrets found in .env for {} declared secret(s).",
-                    declared_secrets.len()
-                );
+                println!("  No matching entries in .env for {declared_count} declared key(s).");
             }
             if !stream_output {
                 println!();
             }
         } else if !stream_output {
-            println!(
-                "Note: manifest declares {} secret(s) but no .env file found.",
-                declared_secrets.len()
-            );
+            println!("Note: manifest declares {declared_count} key(s) but no .env file found.");
             println!("      Set secrets manually or create a .env file.");
             println!();
         }
