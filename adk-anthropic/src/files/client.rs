@@ -6,6 +6,7 @@ use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use reqwest::multipart;
 
 use super::types::{FileDeleteResponse, FileListResponse, FileObject};
+use crate::base_url::validate_base_url;
 use crate::{Error, Result};
 
 /// Default base URL for the Anthropic API.
@@ -21,7 +22,7 @@ const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 /// ```rust,ignore
 /// use adk_anthropic::files::FilesClient;
 ///
-/// let client = FilesClient::new("sk-ant-api03-...")?;
+/// let client = FilesClient::new("placeholder-api-key")?;
 /// let file = client.upload_file("data.csv", csv_bytes).await?;
 /// ```
 #[derive(Debug, Clone)]
@@ -57,9 +58,34 @@ impl FilesClient {
     }
 
     /// Override the base URL.
-    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
-        self.base_url = base_url.into();
-        self
+    ///
+    /// The base URL should be the root URL without the `/v1/` suffix — that is
+    /// added automatically when constructing request URLs.
+    ///
+    /// # Errors
+    ///
+    /// Every request made by this client attaches the Anthropic API key, so the
+    /// base URL must be encrypted. Returns a validation error unless the URL uses
+    /// `https://`, or `http://` with a loopback host (`localhost`, `127.0.0.1`,
+    /// `[::1]`) for local development.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use adk_anthropic::files::FilesClient;
+    ///
+    /// let client = FilesClient::new("placeholder-api-key")?
+    ///     .with_base_url("https://my-proxy.example.com")?;
+    ///
+    /// // Loopback http is allowed for local development
+    /// let local = FilesClient::new("placeholder-api-key")?
+    ///     .with_base_url("http://127.0.0.1:8080")?;
+    /// ```
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Result<Self> {
+        let base_url = base_url.into();
+        validate_base_url(&base_url)?;
+        self.base_url = base_url;
+        Ok(self)
     }
 
     fn build_url(&self, endpoint: &str) -> String {
@@ -300,5 +326,73 @@ fn map_api_error(status: reqwest::StatusCode, body: &str) -> Error {
         413 => Error::BadRequest { message: format!("file too large: {message}"), param: None },
         429 => Error::RateLimit { message, retry_after: None },
         code => Error::Api { status_code: code, error_type, message, request_id: None },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_base_url_is_https() {
+        let client = FilesClient::new("placeholder-api-key").unwrap();
+        assert_eq!(client.base_url, DEFAULT_BASE_URL);
+        assert!(validate_base_url(&client.base_url).is_ok());
+    }
+
+    #[test]
+    fn test_with_base_url_accepts_https() {
+        let client = FilesClient::new("placeholder-api-key")
+            .unwrap()
+            .with_base_url("https://gateway.example.com/anthropic")
+            .unwrap();
+        assert_eq!(client.base_url, "https://gateway.example.com/anthropic");
+    }
+
+    #[test]
+    fn test_with_base_url_allows_loopback_http_for_local_dev() {
+        for url in ["http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"] {
+            let client = FilesClient::new("placeholder-api-key")
+                .unwrap()
+                .with_base_url(url)
+                .unwrap_or_else(|e| panic!("loopback url {url} should be accepted: {e}"));
+            assert_eq!(client.base_url, url);
+        }
+    }
+
+    #[test]
+    fn test_with_base_url_rejects_cleartext_http() {
+        let err = FilesClient::new("placeholder-api-key")
+            .unwrap()
+            .with_base_url("http://files.internal.example.com")
+            .expect_err("a non-loopback http base URL must be rejected");
+
+        assert!(err.is_validation(), "expected a validation error, got {err}");
+        let message = err.to_string();
+        assert!(
+            message.contains("unencrypted"),
+            "error should explain the cleartext risk, got: {message}"
+        );
+        assert!(message.contains("'http'"), "error should name the scheme, got: {message}");
+    }
+
+    #[test]
+    fn test_with_base_url_rejects_non_http_schemes_and_garbage() {
+        for url in ["ftp://files.example.com", "ws://gateway.example.com", "not-a-url"] {
+            let err = FilesClient::new("placeholder-api-key")
+                .unwrap()
+                .with_base_url(url)
+                .expect_err("non-https, non-loopback base URL must be rejected");
+            assert!(err.is_validation(), "expected a validation error for {url}, got {err}");
+        }
+    }
+
+    #[test]
+    fn test_build_url_trims_trailing_slash() {
+        let client = FilesClient::new("placeholder-api-key")
+            .unwrap()
+            .with_base_url("https://api.anthropic.com/")
+            .unwrap();
+        assert_eq!(client.build_url("files"), "https://api.anthropic.com/v1/files");
     }
 }

@@ -125,6 +125,28 @@ impl Anthropic {
         }
     }
 
+    /// Resolve the effective base URL from an optional `ANTHROPIC_BASE_URL` value.
+    ///
+    /// A value supplied through the environment is held to exactly the same rule
+    /// as one supplied through [`Anthropic::with_base_url`]: every request
+    /// attaches the API key, so an unencrypted endpoint would leak the
+    /// credential. When no value is supplied the default Anthropic API URL is
+    /// used.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error when the supplied value is not `https://` and
+    /// not `http://` with a loopback host.
+    fn resolve_base_url(env_value: Option<String>) -> Result<String> {
+        match env_value {
+            Some(value) => {
+                validate_base_url(&value)?;
+                Ok(value)
+            }
+            None => Ok(DEFAULT_API_URL.to_string()),
+        }
+    }
+
     /// Create a new Anthropic client.
     ///
     /// The API key can be provided directly or read from the `ANTHROPIC_API_KEY`
@@ -133,6 +155,14 @@ impl Anthropic {
     ///
     /// The base URL is resolved from the `ANTHROPIC_BASE_URL` environment
     /// variable. If not set, the default Anthropic API URL is used.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error when `ANTHROPIC_BASE_URL` is set to an
+    /// endpoint that would transmit the API key in cleartext — anything other
+    /// than `https://`, or `http://` with a loopback host (`localhost`,
+    /// `127.0.0.1`, `[::1]`). A misconfigured environment fails loudly rather
+    /// than silently falling back to the default URL.
     pub fn new(api_key: Option<String>) -> Result<Self> {
         let api_key = match api_key {
             Some(key) => Self::resolve_api_key(&key)?,
@@ -160,9 +190,10 @@ impl Anthropic {
         // Pre-build headers for performance
         let cached_headers = Arc::new(Self::build_default_headers(&api_key)?);
 
-        // Resolve base URL from environment variable, defaulting to the API URL
-        let base_url =
-            env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+        // Resolve base URL from environment variable, defaulting to the API URL.
+        // An env-provided value is validated here so the cleartext path closed on
+        // `with_base_url` cannot be reopened through the environment.
+        let base_url = Self::resolve_base_url(env::var("ANTHROPIC_BASE_URL").ok())?;
 
         Ok(Self {
             api_key,
@@ -1515,6 +1546,59 @@ mod tests {
                 .unwrap()
                 .with_base_url(url.to_string())
                 .expect_err("non-https, non-loopback base URL must be rejected");
+            assert!(err.is_validation(), "expected a validation error for {url}, got {err}");
+        }
+    }
+
+    // The `ANTHROPIC_BASE_URL` tests exercise `resolve_base_url` directly instead
+    // of mutating the process environment. The environment is process-global, so
+    // setting an intentionally-rejected value would race against every other test
+    // in this binary that calls `Anthropic::new`. `resolve_base_url` is the exact
+    // code path `Anthropic::new` uses for the env value, so nothing is lost.
+
+    #[test]
+    fn env_base_url_absent_falls_back_to_default() {
+        let resolved = Anthropic::resolve_base_url(None).unwrap();
+        assert_eq!(resolved, DEFAULT_API_URL);
+    }
+
+    #[test]
+    fn env_base_url_accepts_https() {
+        let resolved =
+            Anthropic::resolve_base_url(Some("https://gateway.example.com/anthropic".to_string()))
+                .unwrap();
+        assert_eq!(resolved, "https://gateway.example.com/anthropic");
+    }
+
+    #[test]
+    fn env_base_url_allows_loopback_http_for_local_dev() {
+        for url in ["http://localhost:11434", "http://127.0.0.1:11434", "http://[::1]:11434"] {
+            let resolved = Anthropic::resolve_base_url(Some(url.to_string()))
+                .unwrap_or_else(|e| panic!("loopback url {url} should be accepted: {e}"));
+            assert_eq!(resolved, url);
+        }
+    }
+
+    #[test]
+    fn env_base_url_rejects_cleartext_http() {
+        let err =
+            Anthropic::resolve_base_url(Some("http://gateway.internal.example.com".to_string()))
+                .expect_err("a non-loopback http ANTHROPIC_BASE_URL must be rejected");
+
+        assert!(err.is_validation(), "expected a validation error, got {err}");
+        let message = err.to_string();
+        assert!(
+            message.contains("unencrypted"),
+            "error should explain the cleartext risk, got: {message}"
+        );
+        assert!(message.contains("'http'"), "error should name the scheme, got: {message}");
+    }
+
+    #[test]
+    fn env_base_url_rejects_non_http_schemes_and_garbage() {
+        for url in ["ftp://files.example.com", "ws://gateway.example.com", "not-a-url"] {
+            let err = Anthropic::resolve_base_url(Some(url.to_string()))
+                .expect_err("non-https, non-loopback ANTHROPIC_BASE_URL must be rejected");
             assert!(err.is_validation(), "expected a validation error for {url}, got {err}");
         }
     }
