@@ -189,7 +189,10 @@ async fn main() -> anyhow::Result<()> {
 
     println!("📡 Connecting to OpenAI Realtime ({model_id})...");
     runner.connect().await?;
-    println!("✅ Connected — session {session_id}\n");
+    // Print only a short prefix — a live realtime session id is a handle to an
+    // active, billable connection and does not belong in console output in full.
+    let session_ref: String = session_id.chars().take(8).collect();
+    println!("✅ Connected — session {session_ref}…\n");
     println!("Tools registered: get_weather, calculate, get_time");
     println!("Integration: SessionService ✓  MemoryService ✓\n");
 
