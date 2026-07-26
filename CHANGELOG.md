@@ -318,6 +318,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-agent/adk-core/adk-runner: `ParallelAgent` sub-agents no longer read each
+  other's output.** Concurrent branches all read the full session history, so an
+  analyst in a fan-out could see a sibling's answer before forming its own — while
+  the docs described sub-agents as working independently. `ParallelAgent` now
+  places each sub-agent on its own conversation branch
+  (`{parent}.{parallel_agent}.{sub_agent}`) and stamps emitted events with it, and
+  history reads are scoped to that branch: an event is visible when its branch
+  equals the reader's or is an *ancestor* of it, so the conversation leading to
+  the fan-out stays visible while siblings and nested descendants do not. This
+  mirrors ADK Python's `_is_event_belongs_to_branch` and ADK Go's
+  `eventBelongsToBranch`, including the delimiter guard that stops `agent_0` from
+  matching `agent_00`.
+
+  The mechanism is additive and opt-in by construction: an empty branch on either
+  side matches everything, so events written without a branch stay globally
+  visible and agents outside a fan-out are unaffected. New API:
+  `Session::conversation_history_scoped` (defaulted, so existing `Session`
+  implementations keep compiling) and `adk_core::event_belongs_to_branch`. A
+  branch already carrying a deeper path is preserved, so nested workflows compose
+  rather than the outer agent overwriting the inner one.
+
+- **adk-agent: `ParallelAgent` branches now actually run in parallel.** The
+  previous implementation resolved every sub-agent's `run()` future together but
+  then drained each returned `EventStream` to completion in turn. Since
+  `Agent::run` only *builds* a stream — the work happens when the stream is
+  polled — branches executed one at a time, so latency was additive and a slow
+  branch blocked every later one (two 300 ms branches took 604 ms; they now take
+  302 ms). Branch streams are merged with `select_all`, matching the ADK Python
+  (`_merge_agent_run`) and ADK Go (`parallelagent`) designs, including their
+  per-branch backpressure: a branch cannot run ahead while an event it already
+  produced is still being consumed, so the runner's per-event persistence stays
+  in step with execution. Dropping the merged stream now tears down in-flight
+  branches instead of leaving them running. Error handling is unchanged — every
+  branch still drains and a single terminal error is surfaced — except that the
+  reported error is now chosen by sub-agent declaration order rather than by
+  whichever branch failed first, which concurrency would otherwise make a race.
+
 - **adk-runner/adk-agent: workflow agents are resumed at the root across turns**
   (#419) — in a session that persists across turns, `find_agent_to_run` no
   longer routes a follow-up user message to a single sub-agent that responded
