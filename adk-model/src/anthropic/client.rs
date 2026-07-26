@@ -40,7 +40,9 @@ impl AnthropicClient {
         let mut client = Anthropic::new(Some(config.api_key.clone()))
             .map_err(|e| AdkError::model(format!("Failed to create Anthropic client: {e}")))?;
         if let Some(base_url) = &config.base_url {
-            client = client.with_base_url(base_url.clone());
+            client = client.with_base_url(base_url.clone()).map_err(|e| {
+                AdkError::model(format!("Invalid Anthropic base URL '{base_url}': {e}"))
+            })?;
         }
 
         Ok(Self {

@@ -13,6 +13,7 @@ use tokio::time::sleep;
 
 use crate::AccumulatingStream;
 use crate::backoff::ExponentialBackoff;
+use crate::base_url::validate_base_url;
 use crate::client_logger::ClientLogger;
 use crate::error::{Error, Result};
 use crate::observability::{
@@ -181,26 +182,34 @@ impl Anthropic {
     /// The base URL should be the root URL without the `/v1/` suffix - this will
     /// be added automatically when constructing request URLs.
     ///
+    /// # Errors
+    ///
+    /// Every request made by this client attaches the Anthropic API key, so the
+    /// base URL must be encrypted. Returns a validation error unless the URL uses
+    /// `https://`, or `http://` with a loopback host (`localhost`, `127.0.0.1`,
+    /// `[::1]`) for local development.
+    ///
     /// # Examples
     ///
     /// ```
     /// # use adk_anthropic::Anthropic;
     /// // For Anthropic's API (default)
-    /// let client = Anthropic::new(Some("api-key".to_string()))?
-    ///     .with_base_url("https://api.anthropic.com".to_string());
+    /// let client = Anthropic::new(Some("placeholder-api-key".to_string()))?
+    ///     .with_base_url("https://api.anthropic.com".to_string())?;
     ///
     /// // For Minimax (international)
-    /// let client = Anthropic::new(Some("api-key".to_string()))?
-    ///     .with_base_url("https://api.minimax.io/anthropic".to_string());
+    /// let client = Anthropic::new(Some("placeholder-api-key".to_string()))?
+    ///     .with_base_url("https://api.minimax.io/anthropic".to_string())?;
     ///
     /// // For Minimax (China)
-    /// let client = Anthropic::new(Some("api-key".to_string()))?
-    ///     .with_base_url("https://api.minimaxi.com/anthropic".to_string());
+    /// let client = Anthropic::new(Some("placeholder-api-key".to_string()))?
+    ///     .with_base_url("https://api.minimaxi.com/anthropic".to_string())?;
     /// # Ok::<(), adk_anthropic::Error>(())
     /// ```
-    pub fn with_base_url(mut self, base_url: String) -> Self {
+    pub fn with_base_url(mut self, base_url: String) -> Result<Self> {
+        validate_base_url(&base_url)?;
         self.base_url = base_url;
-        self
+        Ok(self)
     }
 
     /// Return the effective API base URL used for message requests.
@@ -258,7 +267,7 @@ impl Anthropic {
     ///
     /// This is a convenience method that chains with_base_url and with_timeout.
     pub fn with_base_url_and_timeout(self, base_url: String, timeout: Duration) -> Result<Self> {
-        self.with_base_url(base_url).with_timeout(timeout)
+        self.with_base_url(base_url)?.with_timeout(timeout)
     }
 
     /// Build default headers for API requests (static method for initialization).
@@ -1410,6 +1419,7 @@ mod tests {
         // Test builder pattern methods
         let configured_client = client
             .with_base_url("https://custom.api.com".to_string())
+            .unwrap()
             .with_max_retries(5)
             .with_backoff_params(2.0, 1.0);
 
@@ -1435,7 +1445,8 @@ mod tests {
     fn build_url_custom_base_without_trailing_slash() {
         let client = Anthropic::new(Some("test_key".to_string()))
             .unwrap()
-            .with_base_url("https://api.minimax.io/anthropic".to_string());
+            .with_base_url("https://api.minimax.io/anthropic".to_string())
+            .unwrap();
         assert_eq!(client.build_url("messages"), "https://api.minimax.io/anthropic/v1/messages");
     }
 
@@ -1443,7 +1454,8 @@ mod tests {
     fn build_url_custom_base_with_trailing_slash() {
         let client = Anthropic::new(Some("test_key".to_string()))
             .unwrap()
-            .with_base_url("https://api.minimax.io/anthropic/".to_string());
+            .with_base_url("https://api.minimax.io/anthropic/".to_string())
+            .unwrap();
         assert_eq!(client.build_url("messages"), "https://api.minimax.io/anthropic/v1/messages");
     }
 
@@ -1451,12 +1463,72 @@ mod tests {
     fn build_url_minimax_china() {
         let client = Anthropic::new(Some("test_key".to_string()))
             .unwrap()
-            .with_base_url("https://api.minimaxi.com/anthropic".to_string());
+            .with_base_url("https://api.minimaxi.com/anthropic".to_string())
+            .unwrap();
         assert_eq!(client.build_url("messages"), "https://api.minimaxi.com/anthropic/v1/messages");
         assert_eq!(
             client.build_url(&format!("models/{}", "claude-3-opus")),
             "https://api.minimaxi.com/anthropic/v1/models/claude-3-opus"
         );
+    }
+
+    #[test]
+    fn with_base_url_accepts_https() {
+        let client = Anthropic::new(Some("placeholder-api-key".to_string()))
+            .unwrap()
+            .with_base_url("https://gateway.example.com/anthropic".to_string())
+            .unwrap();
+        assert_eq!(client.base_url, "https://gateway.example.com/anthropic");
+    }
+
+    #[test]
+    fn with_base_url_allows_loopback_http_for_local_dev() {
+        for url in ["http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"] {
+            let client = Anthropic::new(Some("placeholder-api-key".to_string()))
+                .unwrap()
+                .with_base_url(url.to_string())
+                .unwrap_or_else(|e| panic!("loopback url {url} should be accepted: {e}"));
+            assert_eq!(client.base_url, url);
+        }
+    }
+
+    #[test]
+    fn with_base_url_rejects_cleartext_http() {
+        let err = Anthropic::new(Some("placeholder-api-key".to_string()))
+            .unwrap()
+            .with_base_url("http://gateway.internal.example.com".to_string())
+            .expect_err("a non-loopback http base URL must be rejected");
+
+        assert!(err.is_validation(), "expected a validation error, got {err}");
+        let message = err.to_string();
+        assert!(
+            message.contains("unencrypted"),
+            "error should explain the cleartext risk, got: {message}"
+        );
+        assert!(message.contains("'http'"), "error should name the scheme, got: {message}");
+    }
+
+    #[test]
+    fn with_base_url_rejects_non_http_schemes_and_garbage() {
+        for url in ["ftp://files.example.com", "ws://gateway.example.com", "not-a-url"] {
+            let err = Anthropic::new(Some("placeholder-api-key".to_string()))
+                .unwrap()
+                .with_base_url(url.to_string())
+                .expect_err("non-https, non-loopback base URL must be rejected");
+            assert!(err.is_validation(), "expected a validation error for {url}, got {err}");
+        }
+    }
+
+    #[test]
+    fn with_base_url_and_timeout_rejects_cleartext_http() {
+        let err = Anthropic::new(Some("placeholder-api-key".to_string()))
+            .unwrap()
+            .with_base_url_and_timeout(
+                "http://gateway.internal.example.com".to_string(),
+                Duration::from_secs(5),
+            )
+            .expect_err("a non-loopback http base URL must be rejected");
+        assert!(err.is_validation(), "expected a validation error, got {err}");
     }
 
     #[test]

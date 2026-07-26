@@ -12,8 +12,12 @@
 //! | Enterprise      | https://your-proxy.internal.com/anthropic   |
 //!
 //! Two ways to set the base URL:
-//! 1. Builder: `Anthropic::new(key)?.with_base_url(url)`
+//! 1. Builder: `Anthropic::new(key)?.with_base_url(url)?`
 //! 2. Env var: `ANTHROPIC_BASE_URL=https://...`
+//!
+//! The builder rejects base URLs that would send the API key in cleartext: only
+//! `https://`, or `http://` bound to loopback (localhost, 127.0.0.1, [::1]), is
+//! accepted.
 //!
 //! Run: `ANTHROPIC_API_KEY=sk-... cargo run -p adk-anthropic --example anthropic_custom_base_url`
 
@@ -47,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Using base URL: {custom_url}");
 
-    let client = Anthropic::new(None)?.with_base_url(custom_url);
+    let client = Anthropic::new(None)?.with_base_url(custom_url)?;
 
     let r = client
         .send(MessageCreateParams::simple(
@@ -66,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Ollama (localhost:11434) ===\n");
 
     let ollama_client = Anthropic::new(Some("ollama".to_string()))?
-        .with_base_url("http://localhost:11434".to_string());
+        .with_base_url("http://localhost:11434".to_string())?;
 
     match ollama_client
         .send(MessageCreateParams::simple(

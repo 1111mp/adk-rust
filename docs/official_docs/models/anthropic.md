@@ -76,11 +76,18 @@ with `base_url()`:
 use adk_anthropic::Anthropic;
 
 let client = Anthropic::new(Some(api_key))?
-    .with_base_url("https://api.minimax.io/anthropic".to_string());
+    .with_base_url("https://api.minimax.io/anthropic".to_string())?;
 assert_eq!(client.base_url(), "https://api.minimax.io/anthropic");
 ```
 
 When unset, the client uses Anthropic's public API (`https://api.anthropic.com`).
+
+`with_base_url` returns `Result` because the client attaches the Anthropic API key
+to every request. Only `https://`, or `http://` with a loopback host
+(`localhost`, `127.0.0.1`, `[::1]`) for local development, is accepted — anything
+else is rejected as a validation error rather than silently sending the key in
+cleartext. The same rule applies to `AnthropicConfig::with_base_url`, which is
+validated when `AnthropicClient::new` builds the underlying client.
 
 ## Key Features
 

@@ -9,6 +9,7 @@
 
 mod accumulating_stream;
 mod backoff;
+mod base_url;
 mod cache_control;
 mod client;
 mod client_logger;
