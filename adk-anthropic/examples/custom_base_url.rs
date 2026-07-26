@@ -15,9 +15,10 @@
 //! 1. Builder: `Anthropic::new(key)?.with_base_url(url)?`
 //! 2. Env var: `ANTHROPIC_BASE_URL=https://...`
 //!
-//! The builder rejects base URLs that would send the API key in cleartext: only
+//! Both paths reject base URLs that would send the API key in cleartext: only
 //! `https://`, or `http://` bound to loopback (localhost, 127.0.0.1, [::1]), is
-//! accepted.
+//! accepted. A rejected `ANTHROPIC_BASE_URL` makes `Anthropic::new` fail rather
+//! than silently falling back to the default endpoint.
 //!
 //! Run: `ANTHROPIC_API_KEY=sk-... cargo run -p adk-anthropic --example anthropic_custom_base_url`
 
