@@ -114,11 +114,22 @@ impl ManagedAgentsClient {
         Self::new(api_key)
     }
 
-    /// Override the base URL (for testing or proxies).
+    /// Override the base URL (for proxies, gateways, or self-hosted deployments).
+    ///
+    /// Every request made by this client carries the `x-api-key` header, so the
+    /// base URL must use a transport that protects it. A non-HTTPS base URL is
+    /// rejected unless it points at loopback (`localhost`, `127.0.0.0/8`, `[::1]`),
+    /// which is permitted for local development and tests.
     ///
     /// # Arguments
     ///
     /// * `base_url` - The custom base URL to use for API requests.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Validation`] if the URL cannot be parsed, or if it uses a
+    /// scheme other than `https` for a non-loopback host — sending the API key
+    /// over cleartext HTTP would expose it to anyone on the network path.
     ///
     /// # Example
     ///
@@ -126,11 +137,17 @@ impl ManagedAgentsClient {
     /// use adk_anthropic::managed_agents::ManagedAgentsClient;
     ///
     /// let client = ManagedAgentsClient::new("sk-ant-api03-...")?
-    ///     .with_base_url("https://my-proxy.example.com");
+    ///     .with_base_url("https://my-proxy.example.com")?;
+    ///
+    /// // Local development against a loopback listener is still allowed:
+    /// let local = ManagedAgentsClient::new("sk-ant-api03-...")?
+    ///     .with_base_url("http://127.0.0.1:8080")?;
     /// ```
-    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
-        self.base_url = base_url.into();
-        self
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Result<Self> {
+        let base_url = base_url.into();
+        validate_base_url(&base_url)?;
+        self.base_url = base_url;
+        Ok(self)
     }
 
     /// Override the SSE stream timeout (default: 300 seconds).
@@ -1674,6 +1691,50 @@ fn parse_error_body(body: &str) -> (String, String) {
     }
 }
 
+/// Reject base URLs that would transmit the API key in cleartext.
+///
+/// Every Managed Agents request attaches `x-api-key`, so the only acceptable
+/// schemes are `https` or — for local development — `http` bound to loopback.
+fn validate_base_url(base_url: &str) -> Result<()> {
+    let parsed = url::Url::parse(base_url).map_err(|e| {
+        Error::validation(
+            format!(
+                "managed-agents base URL '{base_url}' is not a valid absolute URL ({e}). \
+                 Provide a full URL such as https://api.anthropic.com."
+            ),
+            Some("base_url".to_string()),
+        )
+    })?;
+
+    if parsed.scheme().eq_ignore_ascii_case("https") {
+        return Ok(());
+    }
+
+    if parsed.scheme().eq_ignore_ascii_case("http") && is_loopback_host(&parsed) {
+        return Ok(());
+    }
+
+    Err(Error::validation(
+        format!(
+            "managed-agents base URL '{base_url}' uses scheme '{}', which would send the \
+             Anthropic API key over an unencrypted connection. Use https://, or http:// with a \
+             loopback host (localhost, 127.0.0.1, [::1]) for local development.",
+            parsed.scheme()
+        ),
+        Some("base_url".to_string()),
+    ))
+}
+
+/// True when the URL host is a loopback address or `localhost`.
+fn is_loopback_host(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(addr)) => addr.is_loopback(),
+        Some(url::Host::Ipv6(addr)) => addr.is_loopback(),
+        None => false,
+    }
+}
+
 /// Build the pre-cached headers for all API requests.
 ///
 /// Every request to the Managed Agents API includes:
@@ -1711,8 +1772,54 @@ mod tests {
     fn test_with_base_url_overrides_default() {
         let client = ManagedAgentsClient::new("test-api-key")
             .unwrap()
-            .with_base_url("https://custom.example.com");
+            .with_base_url("https://custom.example.com")
+            .unwrap();
         assert_eq!(client.base_url, "https://custom.example.com");
+    }
+
+    #[test]
+    fn test_with_base_url_rejects_cleartext_http() {
+        let err = ManagedAgentsClient::new("test-api-key")
+            .unwrap()
+            .with_base_url("http://managed-agents.internal.example.com")
+            .expect_err("a non-loopback http base URL must be rejected");
+
+        assert!(err.is_validation(), "expected a validation error, got {err}");
+        let message = err.to_string();
+        assert!(
+            message.contains("unencrypted"),
+            "error should explain the cleartext risk, got: {message}"
+        );
+        assert!(message.contains("https://"), "error should suggest https, got: {message}");
+    }
+
+    #[test]
+    fn test_with_base_url_allows_loopback_http_for_local_dev() {
+        for url in ["http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"] {
+            let client = ManagedAgentsClient::new("test-api-key")
+                .unwrap()
+                .with_base_url(url)
+                .unwrap_or_else(|e| panic!("loopback url {url} should be accepted: {e}"));
+            assert_eq!(client.base_url, url);
+        }
+    }
+
+    #[test]
+    fn test_with_base_url_rejects_non_http_schemes_and_garbage() {
+        for url in ["ftp://files.example.com", "ws://gateway.example.com", "not-a-url"] {
+            let err = ManagedAgentsClient::new("test-api-key")
+                .unwrap()
+                .with_base_url(url)
+                .expect_err("non-https, non-loopback base URL must be rejected");
+            assert!(err.is_validation(), "expected a validation error for {url}, got {err}");
+        }
+    }
+
+    #[test]
+    fn test_default_base_url_is_https() {
+        let client = ManagedAgentsClient::new("test-api-key").unwrap();
+        assert!(client.base_url.starts_with("https://"));
+        assert!(validate_base_url(&client.base_url).is_ok());
     }
 
     #[test]
@@ -1737,7 +1844,8 @@ mod tests {
     fn test_build_url_trims_trailing_slash() {
         let client = ManagedAgentsClient::new("test-api-key")
             .unwrap()
-            .with_base_url("https://api.anthropic.com/");
+            .with_base_url("https://api.anthropic.com/")
+            .unwrap();
         assert_eq!(client.build_url("agents"), "https://api.anthropic.com/v1/agents");
     }
 
