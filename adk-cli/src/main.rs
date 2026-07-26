@@ -99,22 +99,37 @@ async fn main() -> Result<()> {
     }
 }
 
-/// Resolve provider/model/key non-interactively (default: a Gemini 3 model;
-/// key from `--api-key` or the environment). Returns the model and its id.
-fn resolve_model(
+/// Resolve the provider and its display model id from the CLI flags.
+///
+/// This is deliberately kept free of any credential handling: the returned
+/// `model_id` is derived only from `--provider` / `--model` (or the provider's
+/// default) and is therefore safe to echo to the console. Key material is
+/// resolved separately by [`build_model`], so no code path can conflate the
+/// two.
+fn resolve_model_id(
     cli_provider: Option<ModelProvider>,
     cli_model: Option<String>,
-    cli_api_key: Option<String>,
-    thinking_budget: Option<u32>,
-) -> Result<(Arc<dyn Llm>, String)> {
+) -> (ModelProvider, String) {
     let provider = cli_provider.unwrap_or(ModelProvider::Gemini);
     let model_id = cli_model.unwrap_or_else(|| match provider {
         ModelProvider::Gemini => "gemini-3.1-flash-lite".to_string(),
         _ => provider.default_model().to_string(),
     });
+    (provider, model_id)
+}
+
+/// Build the model for an already-resolved provider and model id.
+///
+/// The API key comes from `--api-key` or the provider's conventional
+/// environment variable. Nothing derived from the key is returned.
+fn build_model(
+    provider: ModelProvider,
+    model_id: &str,
+    cli_api_key: Option<String>,
+    thinking_budget: Option<u32>,
+) -> Result<Arc<dyn Llm>> {
     let api_key = cli_api_key.or_else(|| env_api_key(provider));
-    let model = create_model(provider, &model_id, api_key.as_deref(), thinking_budget)?;
-    Ok((model, model_id))
+    create_model(provider, model_id, api_key.as_deref(), thinking_budget)
 }
 
 /// Drive one agent turn on an existing runner/session, streaming the trace.
@@ -203,7 +218,8 @@ async fn run_goal(args: GoalArgs) -> Result<()> {
         resume,
     } = args;
 
-    let (model, model_id) = resolve_model(provider, model, api_key, thinking_budget)?;
+    let (provider, model_id) = resolve_model_id(provider, model);
+    let model = build_model(provider, &model_id, api_key, thinking_budget)?;
     let coding = CodingAgent::builder().model(model).workspace(Workspace::new(&dir)).build()?;
 
     let state_path = state.unwrap_or_else(|| format!("{dir}/.adk/goal.json"));
@@ -328,7 +344,8 @@ async fn run_code(
     read_only: bool,
     task: String,
 ) -> Result<()> {
-    let (model, model_id) = resolve_model(cli_provider, cli_model, cli_api_key, thinking_budget)?;
+    let (provider, model_id) = resolve_model_id(cli_provider, cli_model);
+    let model = build_model(provider, &model_id, cli_api_key, thinking_budget)?;
     let workspace = if read_only { Workspace::read_only(&dir) } else { Workspace::new(&dir) };
     let coding = CodingAgent::builder().model(model).workspace(workspace).build()?;
 

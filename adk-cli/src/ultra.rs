@@ -41,8 +41,8 @@ pub async fn run(
     task: String,
     max_rounds: i64,
 ) -> Result<()> {
-    let (model, model_id) =
-        crate::resolve_model(cli_provider, cli_model, cli_api_key, thinking_budget)?;
+    let (provider, model_id) = crate::resolve_model_id(cli_provider, cli_model);
+    let model = crate::build_model(provider, &model_id, cli_api_key, thinking_budget)?;
     let root = PathBuf::from(&dir);
 
     println!("ultracode ({model_id}) on {dir}");
