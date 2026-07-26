@@ -25,6 +25,7 @@ use super::vaults::{
     CreateCredentialParams, CreateVaultParams, Credential, CredentialValidation,
     UpdateCredentialParams, Vault, VaultListResponse,
 };
+use crate::base_url::validate_base_url;
 use crate::{Error, Result};
 
 /// Default base URL for the Anthropic API.
@@ -1688,50 +1689,6 @@ fn parse_error_body(body: &str) -> (String, String) {
         (error_type, message)
     } else {
         ("api_error".to_string(), body.to_string())
-    }
-}
-
-/// Reject base URLs that would transmit the API key in cleartext.
-///
-/// Every Managed Agents request attaches `x-api-key`, so the only acceptable
-/// schemes are `https` or — for local development — `http` bound to loopback.
-fn validate_base_url(base_url: &str) -> Result<()> {
-    let parsed = url::Url::parse(base_url).map_err(|e| {
-        Error::validation(
-            format!(
-                "managed-agents base URL '{base_url}' is not a valid absolute URL ({e}). \
-                 Provide a full URL such as https://api.anthropic.com."
-            ),
-            Some("base_url".to_string()),
-        )
-    })?;
-
-    if parsed.scheme().eq_ignore_ascii_case("https") {
-        return Ok(());
-    }
-
-    if parsed.scheme().eq_ignore_ascii_case("http") && is_loopback_host(&parsed) {
-        return Ok(());
-    }
-
-    Err(Error::validation(
-        format!(
-            "managed-agents base URL '{base_url}' uses scheme '{}', which would send the \
-             Anthropic API key over an unencrypted connection. Use https://, or http:// with a \
-             loopback host (localhost, 127.0.0.1, [::1]) for local development.",
-            parsed.scheme()
-        ),
-        Some("base_url".to_string()),
-    ))
-}
-
-/// True when the URL host is a loopback address or `localhost`.
-fn is_loopback_host(url: &url::Url) -> bool {
-    match url.host() {
-        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-        Some(url::Host::Ipv4(addr)) => addr.is_loopback(),
-        Some(url::Host::Ipv6(addr)) => addr.is_loopback(),
-        None => false,
     }
 }
 
