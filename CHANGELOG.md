@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **adk-realtime: schema-drift warnings no longer log raw provider frames.** When a
+  recognized OpenAI realtime event failed to deserialize, the warning logged the first 300
+  bytes of the raw WebSocket text with no payload-recording opt-in and no redaction.
+  Realtime frames carry transcripts, tool arguments, tool results, and identifiers, so
+  provider schema drift could push conversation content into warning logs — at exactly the
+  moment operators widen log collection. The warning now reports `event_type`, the parse
+  error, `payload.bytes`, and a correlation `payload.digest`, with `payload.raw` set to
+  `<redacted>`. The new `record-payloads` feature on `adk-realtime` restores bounded raw
+  recording for diagnosis, matching the flag `adk-agent` already uses for trace payloads.
 - **adk-devtools: `bash` no longer inherits the agent's environment, and a timeout takes
   descendants with it.** `BashTool` ran `sh -c` with only `current_dir` set. It never
   called `env_clear`, so a model-directed command could read the parent environment — an
