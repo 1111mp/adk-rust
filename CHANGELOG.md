@@ -481,6 +481,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-realtime: integrated sessions actually receive the history and memory they load.**
+  `IntegratedRealtimeRunner::connect` fetched the prior session into `_session` and dropped it,
+  and the memory branch logged "injecting memory entries into session context" next to a
+  comment saying injection was a future enhancement. A resumed session began with neither the
+  history nor the memory the builder implies, while the logs reported otherwise. Both are now
+  rendered into one bounded block and prepended to the system instruction before the provider
+  session is created, governed by `max_memory_injection` and the new `max_history_injection`.
+  `IntegratedRealtimeRunner::instruction()` and `RealtimeRunner::instruction()` expose what a
+  session was created with, so carried context can be asserted instead of inferred from logs.
 - **adk-realtime: `max_concurrent_tools` is enforced, and tools no longer stall the event
   loop.** The field defaulted to 4 and was read by nothing — no semaphore, no scheduler.
   `FunctionCallDone` was awaited inline in `handle_event`, which the run loop awaited before
