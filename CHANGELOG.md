@@ -577,6 +577,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-graph: functional `TaskContext::interrupt` can be resumed with a typed value.** The method
+  emitted an event, saved a checkpoint, recorded an `__interrupt__` task, and then always returned
+  `InterruptTypeMismatch { message: "workflow interrupted" }` — its own comment deferred
+  suspension and resumption to future work, and nothing outside the method consumed a resume
+  value. The signature promised typed resumption that could not occur. Each interrupt site now
+  gets a continuation key from its position in the run (`interrupt-1`, `interrupt-2`, …), reported
+  in the new `FunctionalError::Suspended` and written to the checkpoint as `continuation_key`.
+  `TaskContext::with_resume_values` supplies values by key, and an interrupt whose key is present
+  returns the deserialized value at the call site. `InterruptTypeMismatch` now means what its name
+  says: the supplied value did not deserialize into the expected type.
 - **adk-agent: an ambient agent invokes the agent, delivers its output, and does not serialize
   triggers.** `AmbientAgent::start` succeeded without a trigger handler and then only logged each
   event, so `AmbientAgent::new(..).start()` appeared to run an agent that was never invoked; it
