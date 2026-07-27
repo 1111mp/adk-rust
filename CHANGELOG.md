@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **adk-computer-use: security-relevant MCP responses are bound to the request that produced
+  them.** `ControlLease`, `TargetReservation`, and `ExecutionReceipt` were deserialized and
+  returned straight into graph state. Typed deserialization proves shape, not provenance, and
+  none of these structs has an invariant-enforcing constructor, so a well-formed object
+  belonging to another session, principal, agent, mode, or action parsed cleanly and was
+  accepted. Each is now validated against the requesting envelope — including active lease
+  state, remaining action budget, and the receipt's `action_digest` against the envelope's
+  approval-bound `args_digest` — and a mismatch raises
+  `ComputerUseError::IdentityMismatch` naming the field. The external runtime remains
+  authoritative; this is the local defense that stops a stale or confused response from
+  propagating.
+- **adk-computer-use: verification no longer equates "committed" with "verified".** `verify`
+  returned `receipt.status == ReceiptStatus::Committed`, collapsing two distinct claims: that
+  the runtime performed the action, and that the intended effect occurred. A committed action
+  whose effect did not happen was reported as completed, from the node the reference graph
+  labels "verify". `verify` now receives the envelope's declared `ActionPostcondition` — which
+  the old signature could not even see — and returns `VerificationOutcome::Verified`,
+  `CommittedUnverified { reason }`, or `Failed { reason }`. Verification requires evidence on
+  the receipt bound to the postcondition's digest; absence of evidence is reported as
+  committed-but-unverified rather than treated as success. The graph writes `verified`,
+  `committed`, and `result.verificationDetail` separately.
 - **adk-agent: `WebhookTrigger` has a trust boundary and a bounded lifetime.** The trigger
   bound `0.0.0.0:<port>` and accepted every POST on its path — no signature check, no
   authentication hook, no principal, no body policy — so any caller who could reach the port
@@ -265,6 +286,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `adk-acp` | New public fields: `PermissionRequest::{session_id, tool_call_id, kind, raw_input}`, `AcpAgentConfig::{mcp_servers, filesystem, terminal}`, `PermissionOption::kind` | Struct literals must add the fields; prefer `..Default::default()` |
   | `adk-acp` | New variants: `OutputChunk::{ToolUpdate, Usage}`, `PermissionPolicy::AsyncCustom` | Exhaustive `match` must add arms |
   | `adk-acp` | `AcpAgentConfig` no longer `UnwindSafe`/`RefUnwindSafe` | Affects code storing it across `catch_unwind` |
+  | `adk-computer-use` | `ComputerUseRuntime::verify` takes the action postcondition and returns `VerificationOutcome` instead of `bool` | Match the outcome; `is_verified()` is true only when the postcondition was observed, `is_committed()` covers "performed but unverified" |
   | `adk-agent` | `TriggerEvent` gains a public `principal` field | Add `principal: None` to struct literals; webhook events carry the verified principal |
   | `adk-agent` | `WebhookTrigger` binds loopback by default, requires a verifier for any wider address, and rejects non-JSON bodies | Call `with_bind_address` plus `with_verifier` to expose it; `accept_non_json()` restores the old body handling |
   | `adk-agent` | `WebhookTrigger` no longer `UnwindSafe`/`RefUnwindSafe` | It now holds a verifier behind `Arc<dyn ...>`; affects code storing it across `catch_unwind` |
