@@ -577,6 +577,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-agent: an ambient agent invokes the agent, delivers its output, and does not serialize
+  triggers.** `AmbientAgent::start` succeeded without a trigger handler and then only logged each
+  event, so `AmbientAgent::new(..).start()` appeared to run an agent that was never invoked; it
+  now fails with an error naming what is missing. Events and errors the agent produces are
+  delivered through `take_output(capacity)` instead of being logged at debug level and dropped.
+  Triggers are dispatched under `with_max_concurrent_triggers` (default 4) rather than one at a
+  time — the loop previously drained a handler's entire event stream before polling the source
+  again, so one slow trigger blocked every later one. Durable offsets, dead letters, and retry
+  remain the caller's responsibility and are documented as such.
 - **Release statements are checked against one source.** The workspace version, the changelog
   heading, the README release banner, and the README roadmap's "current" marker were
   maintained independently. `scripts/check-doc-versions.sh` skips `CHANGELOG.md` and never
