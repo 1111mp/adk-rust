@@ -115,6 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are unimplemented. A caller selecting an enforcer by probing would pick it and fail at
   run time, so `probe` now returns `EnforcerUnavailable` naming AppContainer. The README,
   sandbox docs, example README, and AGENTS.md no longer list AppContainer as supported.
+
 - **adk-sandbox: Rust compilation runs inside the boundary, policy env is applied, and the
   isolation class is reported.** `ProcessBackend` compiled Rust source with a command
   built outside `run_command` and awaited with `output()`, so the compile phase had no
@@ -577,6 +578,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-sandbox: sandboxed compilation uses the caller's toolchain.** The compile phase passed
+  `RUSTUP_HOME` and `CARGO_HOME` into the sandbox but not `RUSTUP_TOOLCHAIN`. `rustc` on `PATH` is
+  usually a rustup shim, so without it the shim ignored the caller's selection and resolved
+  `rust-toolchain.toml` instead — compiling with a different toolchain than intended, or, when the
+  pinned one is not installed, attempting a download that the sandbox's network denial blocks. That
+  surfaced as `info: syncing channel updates for …` reported as a compile failure.
+
+- **adk-sandbox: the Linux bubblewrap enforcer is selectable again.** `LinuxEnforcer::probe` ran
+  `bwrap --unshare-user -- /bin/true` with no bind mounts. bwrap gives the new namespace an empty
+  root, so `/bin/true` did not exist inside it and `execvp` failed — which the probe reported as
+  "user namespaces are not available. Check that `kernel.unprivileged_userns_clone` sysctl is set
+  to 1". The check therefore failed on **every** host, including hosts where bubblewrap works
+  perfectly, so `get_enforcer()` never returned the bubblewrap enforcer: Linux ran with no
+  OS-level sandbox while the documentation advertised one, and the diagnostic pointed operators at
+  a sysctl that was never the cause. The probe now binds the root filesystem, so it tests what it
+  claims to.
+- **adk-sandbox: the bubblewrap argument property tests compile.** `bwrap_args_property_tests.rs`
+  used an inline `{args:?}` capture inside `prop_assert_eq!`, which expands through `concat!` and
+  cannot capture. The file is both `cfg(target_os = "linux")` and behind the `sandbox-linux`
+  feature, so no build ever compiled it and the failure went unnoticed; the bwrap argument
+  construction had no executing test coverage on the only platform where it runs.
 - **adk-graph: functional `TaskContext::interrupt` can be resumed with a typed value.** The method
   emitted an event, saved a checkpoint, recorded an `__interrupt__` task, and then always returned
   `InterruptTypeMismatch { message: "workflow interrupted" }` — its own comment deferred
