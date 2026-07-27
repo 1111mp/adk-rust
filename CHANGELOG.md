@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **adk-core/adk-auth: secret access from tools is authorizable and audited.**
+  `SecretService` and `SecretProvider` received only a secret *name*. Once a provider
+  was attached to an invocation, policy collapsed to whatever the backing cloud
+  credentials could read: nothing distinguished a weather tool requesting its own API
+  key from the same tool requesting a payment or database secret, and the ADK layer kept
+  no record of the access.
+
+  New `adk_core::SecretRequest` carries the requested name plus the identity the
+  framework observed — tool, app, user, session, invocation — and an optional purpose.
+  `SecretService::get_secret_for` and `InvocationContext::get_secret_for` take it, both
+  defaulting to the previous name-only behaviour so existing implementations keep
+  compiling. `ToolContext::get_secret_for_purpose` lets a tool state why it needs a
+  secret.
+
+  The identity is not something a tool asserts: `LlmAgent` stamps the dispatched tool's
+  name onto the request from its own dispatch record, so a tool cannot present another
+  tool's identity. Every workflow wrapper forwards the described access, as with the
+  other context capabilities.
+
+  `adk_auth::secrets::authorizing::AuthorizingSecretService` enforces declarative
+  per-tool grants (exact names or a namespace prefix), denying everything until granted.
+  A denied name never reaches the provider, so it does not even appear as an attempted
+  read in provider-side logs. Every decision goes to `SecretAuditSink` and to tracing
+  with the outcome, name, tool, user, invocation, and reason — never a value.
+
+  One boundary remains: an agent invoked as a tool crosses a `ToolContext`, which
+  carries no identity of its own, so accesses inside that agent present the outer
+  agent's identity rather than the inner tool's. That is documented rather than papered
+  over.
+
+- **adk-auth: the secret cache is now bounded, revocable, and cleared.**
+  `CachedSecretProvider` stored values in an unbounded `HashMap` and checked the TTL
+  only when the same name was read again. Expired entries were never removed, a
+  rotated secret could not be dropped before its TTL elapsed, there was no capacity
+  limit, and values were not cleared on drop. The TTL therefore governed what the
+  cache *returned* while a value requested once stayed resident for the lifetime of
+  the process, and many distinct names could grow the cache without bound.
+
+  New controls: `with_max_entries` (default 128, least-recently-used eviction, `0`
+  disables caching), `invalidate`, `invalidate_all`, and `purge_expired`. Entries are
+  zeroized on drop, and `Debug` for the cache is redacted so a diagnostic print cannot
+  leak a value.
+
+  This shortens residency to roughly the TTL rather than closing the window: a
+  `String` may already have been reallocated, copied by the allocator, swapped, or
+  captured in a core dump. The documentation states that, and also states plainly that
+  the provider interface takes only a secret name — there is no per-tool grant or
+  access audit at the ADK layer, so the cloud credentials remain the real boundary.
+  Secret providers were previously absent from the official documentation entirely.
 - **adk-core/adk-memory: project-scoped memory no longer falls back to global
   scope.** `add_session_to_project`, `add_entry_to_project`, and
   `delete_entries_in_project` had default implementations that discarded `project_id`
