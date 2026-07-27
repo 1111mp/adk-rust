@@ -492,6 +492,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-managed: deleting a session now deletes its persisted conversation.**
+  `delete_session` archived the session, cancelled its loop, and dropped the in-memory
+  handle, but never called `SessionService::delete` — even though `start_session` had seeded a
+  persistent session that the Runner appended every turn to. The API reported deletion while
+  the conversation remained in the configured backend, outliving the process that deleted it.
+  The identity used at creation is now recorded on the session and used for deletion, so a
+  change to session addressing cannot orphan data. If backend deletion fails, the error names
+  the app, user, and session that still hold data.
+- **adk-managed: session status reflects normal execution, not only control-plane calls.**
+  `ActiveSession` owned the `Arc<RwLock<SessionStatus>>` that `ManagedAgentRuntime::status`
+  reads, while `SessionLoop` owned a separate plain field, despite a comment claiming the two
+  were shared. Queued → running → idle transitions updated only the loop's copy, so a session
+  actively executing turns kept reporting `Queued`; only pause, resume, archive, and deletion
+  moved the public value. The loop now writes to the caller's handle via
+  `SessionLoop::with_shared_status`.
 - **adk-realtime: integrated sessions actually receive the history and memory they load.**
   `IntegratedRealtimeRunner::connect` fetched the prior session into `_session` and dropped it,
   and the memory branch logged "injecting memory entries into session context" next to a
