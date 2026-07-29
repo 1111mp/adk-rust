@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **adk-computer-use: lease validation enforces expiry, remaining budget, and target
+  boundaries.** `validate_lease` checked session, principal, agent, execution mode, and
+  `state == "active"`, plus `action_budget == 0` — the *total* budget, so a lease with
+  `action_budget: 1, actions_used: 1` passed while authorizing nothing. It never read
+  `expires_at` or `boundaries`, so an expired lease and a lease scoped to a different application
+  were accepted as well. All three are now checked, and an expiry that cannot be parsed is
+  rejected rather than skipped.
 - **adk-awp: subscription HMAC secrets no longer leave the process.** `EventSubscription`
   serialized `secret` as a plain field and `GET /awp/events/subscriptions` returned
   `Json(subs)`, so listing subscriptions disclosed every subscriber's signing key — on an
