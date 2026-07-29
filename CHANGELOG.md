@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **adk-awp: subscription HMAC secrets no longer leave the process.** `EventSubscription`
+  serialized `secret` as a plain field and `GET /awp/events/subscriptions` returned
+  `Json(subs)`, so listing subscriptions disclosed every subscriber's signing key — on an
+  endpoint with no authentication, meaning anyone who could reach it could collect the keys and
+  forge signed webhook deliveries. The field is now `skip_serializing`, and a hand-written
+  `Debug` redacts it so capturing a subscription in a `tracing` call cannot write a live
+  credential to the logs. The secret remains available in-process for signing.
+- **adk-awp: management routes are separated from the public ones.** `awp_routes` mounted
+  discovery, manifest, health, A2A, and subscription CRUD as one unauthenticated router. The new
+  `awp_public_routes` and `awp_management_routes` let an auth layer be applied to the half that
+  creates, enumerates, and deletes webhook destinations. `awp_routes` still returns everything
+  for local development, and its rustdoc says why that is not a production shape.
 - **adk-server: A2A JSON-RPC routes now sit behind the configured authentication layer.**
   `/a2a` and `/a2a/stream` were merged at the router root, outside the layer applied to `/api`,
   in both `create_app_with_a2a` and `ServerBuilder::build`. A deployment that authenticated every
