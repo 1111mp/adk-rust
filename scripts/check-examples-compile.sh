@@ -23,9 +23,10 @@ cd "$ROOT" || exit 1
 SHARD_INDEX="${1:-0}"
 SHARD_TOTAL="${2:-1}"
 
-# The Monty example pulls a large git dependency and belongs to the separately
-# cached out-of-workspace Monty build in ci-merge.yml/codeact-monty.yml.
-SKIP_EXAMPLES=("examples/codeact_monty_agent")
+# Examples excluded from this gate (each entry names its own workflow/reason).
+# Currently empty: the Monty example compiles here like any other since monty
+# moved to crates.io and adk-codeact-monty joined the workspace.
+SKIP_EXAMPLES=()
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target/examples-check}"
 
@@ -38,7 +39,8 @@ for manifest in "${MANIFESTS[@]}"; do
     dir="$(dirname "$manifest")"
 
     skip=0
-    for excluded in "${SKIP_EXAMPLES[@]}"; do
+    # `${arr[@]+...}` keeps `set -u` happy on an empty array under bash 3.2.
+    for excluded in ${SKIP_EXAMPLES[@]+"${SKIP_EXAMPLES[@]}"}; do
         if [[ "$dir" == "$excluded" ]]; then skip=1; fi
     done
     if (( skip )); then

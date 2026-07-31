@@ -293,7 +293,7 @@ expensive axes just move to a later tier.
 | Tier | Trigger | Checks | Blocks merge? |
 |------|---------|--------|---------------|
 | **PR** | pull request (`ci.yml` + `semver.yml`) | `fmt` (prerequisite gate), `clippy --workspace -D warnings`, `nextest --workspace` on Linux (at most once), `feature-coverage` (feature-gated modules like `adk-agent --features codeact`), docs and doctests, standalone examples (4 shards), `templates`, a compile-only macOS build, a Windows workspace build with a targeted sandbox portability smoke, and `semver` (stable strict, beta warn-only) | Yes — this is the required-check set |
-| **Merge** | `push: main` (`ci-merge.yml`) | cross-platform `nextest --workspace` on macOS/Windows, out-of-workspace Monty build, doc-example compilation | No — runs post-merge |
+| **Merge** | `push: main` (`ci-merge.yml`) | cross-platform `nextest --workspace` on macOS/Windows, doc-example compilation | No — runs post-merge |
 | **Nightly** | `schedule` (`ci-nightly.yml`) | feature-combination matrix, `cargo-audit`/`cargo-deny` supply-chain, `#[ignore]` integration tests gated on secrets | No — runs on a schedule |
 
 Only the **PR tier** gates merges. The merge and nightly tiers run after a change
@@ -356,10 +356,10 @@ Notes:
   the job) and a warn-only beta/experimental check (which never fails). Requiring
   the `semver` job therefore requires only the stable-tier semver gate, keeping the
   beta check advisory (Requirement 5.3).
-- `codeact-feature` (from `codeact-monty.yml`) is **path-filtered** to CodeAct
-  paths and does **not** run on most PRs, so it MUST NOT be required — the
-  always-on `feature-coverage (adk-agent, codeact)` job is the merge-blocking
-  CodeAct signal instead.
+- The always-on `feature-coverage (adk-agent, codeact)` job is the merge-blocking
+  CodeAct signal. (`adk-codeact-monty` itself is a workspace member since Monty
+  reached crates.io, so `clippy`/`test` cover it like any other crate; the
+  former `codeact-monty.yml` workflow is gone.)
 
 ### NOT required (informational tiers)
 
@@ -367,11 +367,9 @@ These run post-merge or on a schedule and MUST NOT be branch-protection-required
 
 - **Merge tier** (`ci-merge.yml`, `on: push: branches:[main]`):
   `cross-platform-test (macos-latest)`, `cross-platform-test (windows-latest)`,
-  `out-of-workspace-monty`, `doc-examples`.
+  `doc-examples`.
 - **Nightly tier** (`ci-nightly.yml`, `on: schedule`): the `features (…)`
   feature-combination matrix jobs, `supply-chain`, `integration-tests`.
-- **Weekly out-of-workspace** (`codeact-monty.yml` cron): `monty-runtime`; and the
-  path-filtered `codeact-feature` PR job (see note above).
 
 ### Applying the required-check set
 

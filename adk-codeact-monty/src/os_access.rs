@@ -32,10 +32,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chrono::{Datelike, FixedOffset, Timelike, Utc};
-use monty::fs::{MountMode, MountTable};
-use monty::{
+use monty_fs::{MountCallOutcome, MountMode, MountTable};
+use monty_types::{
     DictPairs, ExcType, ExtFunctionResult, GetenvArgs, MontyDate, MontyDateTime, MontyException,
-    MontyObject, OsFunctionCall,
+    MontyObject, MontyTimeZone, OsFunctionCall,
 };
 
 use adk_agent::codeact::RuntimeError;
@@ -164,43 +164,49 @@ impl OsAccess {
     /// Resolve a single OS call against this policy, producing the value (or
     /// exception) to resume the interpreter with.
     ///
-    /// The call is borrowed, never taken, so the `OsFunctionCall::Used`
-    /// placeholder is never observed here.
+    /// The call is consumed: [`MountTable::handle_os_call`] moves a covered
+    /// write's payload into the backend without a copy, and hands the call
+    /// back ([`MountCallOutcome::NotHandled`]) when no mount covers it so the
+    /// fallback can render it.
     pub(crate) fn resolve(
         &self,
-        call: &OsFunctionCall,
+        call: OsFunctionCall,
         mounts: &mut MountTable,
     ) -> ExtFunctionResult {
         match call {
             OsFunctionCall::Getenv(args) => self.getenv(args),
             OsFunctionCall::GetEnviron => self.get_environ(),
             OsFunctionCall::DateToday if self.system_clock => date_today(),
-            OsFunctionCall::DateTimeNow(tz) if self.system_clock => datetime_now(tz),
+            OsFunctionCall::DateTimeNow(ref tz) if self.system_clock => datetime_now(tz),
             // Clock disabled: surface Monty's standard "not supported" error.
-            OsFunctionCall::DateToday | OsFunctionCall::DateTimeNow(_) => {
+            call @ (OsFunctionCall::DateToday | OsFunctionCall::DateTimeNow(_)) => {
                 ExtFunctionResult::Error(call.on_no_handler())
             }
             // Everything else is a filesystem operation routed through the
             // mount table.
-            _ => match mounts.handle_os_call(call) {
-                Some(Ok(value)) => ExtFunctionResult::Return(value),
-                Some(Err(err)) => ExtFunctionResult::Error(err.into_exception()),
+            call => match mounts.handle_os_call(call) {
+                MountCallOutcome::Handled(Ok(value)) => ExtFunctionResult::Return(value),
+                MountCallOutcome::Handled(Err(err)) => {
+                    ExtFunctionResult::Error(err.into_exception())
+                }
                 // No mount covers this path. Existence checks report `False`
                 // (CPython semantics); anything else is a permission error.
-                None if call.is_existence_check() => {
+                MountCallOutcome::NotHandled(call) if call.is_existence_check() => {
                     ExtFunctionResult::Return(MontyObject::Bool(false))
                 }
-                None => ExtFunctionResult::Error(call.on_no_handler()),
+                MountCallOutcome::NotHandled(call) => {
+                    ExtFunctionResult::Error(call.on_no_handler())
+                }
             },
         }
     }
 
     /// Look up an environment variable, falling back to the call's `default`
     /// (which Monty already projected to a [`MontyObject`]) when it is unset.
-    fn getenv(&self, args: &GetenvArgs) -> ExtFunctionResult {
+    fn getenv(&self, args: GetenvArgs) -> ExtFunctionResult {
         match self.environ.get(&args.key) {
             Some(value) => ExtFunctionResult::Return(MontyObject::String(value.clone())),
-            None => ExtFunctionResult::Return(args.default.clone()),
+            None => ExtFunctionResult::Return(args.default),
         }
     }
 
@@ -387,15 +393,14 @@ fn date_today() -> ExtFunctionResult {
 /// Service `datetime.now(tz=...)` from the host clock.
 ///
 /// `tz` is `None` for a naive local datetime, or a fixed-offset
-/// [`MontyObject::TimeZone`] for an aware one (Monty validates the argument
-/// before producing the call, so no other shape is expected).
-fn datetime_now(tz: &MontyObject) -> ExtFunctionResult {
+/// [`MontyTimeZone`] for an aware one.
+fn datetime_now(tz: &Option<MontyTimeZone>) -> ExtFunctionResult {
     match tz {
-        MontyObject::None => {
+        None => {
             let now = chrono::Local::now().naive_local();
             ExtFunctionResult::Return(MontyObject::DateTime(monty_datetime(&now, None, None)))
         }
-        MontyObject::TimeZone(zone) => {
+        Some(zone) => {
             let Some(offset) = FixedOffset::east_opt(zone.offset_seconds) else {
                 return ExtFunctionResult::Error(MontyException::new(
                     ExcType::ValueError,
@@ -409,12 +414,6 @@ fn datetime_now(tz: &MontyObject) -> ExtFunctionResult {
                 zone.name.clone(),
             )))
         }
-        // `validate_tz_arg` upstream guarantees `None` or a timezone; anything
-        // else is defensive.
-        _ => ExtFunctionResult::Error(MontyException::new(
-            ExcType::TypeError,
-            Some("datetime.now() expects a timezone or None".to_string()),
-        )),
     }
 }
 
@@ -447,7 +446,7 @@ mod tests {
         let mut mounts = access.build_mount_table().unwrap();
 
         let hit = access.resolve(
-            &OsFunctionCall::Getenv(GetenvArgs {
+            OsFunctionCall::Getenv(GetenvArgs {
                 key: "HOME".to_string(),
                 default: MontyObject::None,
             }),
@@ -458,7 +457,7 @@ mod tests {
         );
 
         let miss = access.resolve(
-            &OsFunctionCall::Getenv(GetenvArgs {
+            OsFunctionCall::Getenv(GetenvArgs {
                 key: "MISSING".to_string(),
                 default: MontyObject::String("fallback".to_string()),
             }),
@@ -475,7 +474,7 @@ mod tests {
         let mut mounts = access.build_mount_table().unwrap();
 
         let ExtFunctionResult::Return(MontyObject::Dict(pairs)) =
-            access.resolve(&OsFunctionCall::GetEnviron, &mut mounts)
+            access.resolve(OsFunctionCall::GetEnviron, &mut mounts)
         else {
             panic!("expected a dict from os.environ");
         };
@@ -487,13 +486,13 @@ mod tests {
         let access = OsAccess::sandboxed();
         let mut mounts = access.build_mount_table().unwrap();
 
-        let read = access.resolve(&OsFunctionCall::ReadText("/etc/passwd".into()), &mut mounts);
+        let read = access.resolve(OsFunctionCall::ReadText("/etc/passwd".into()), &mut mounts);
         match read {
             ExtFunctionResult::Error(exc) => assert_eq!(exc.exc_type(), ExcType::PermissionError),
             other => panic!("expected PermissionError, got {other:?}"),
         }
 
-        let exists = access.resolve(&OsFunctionCall::Exists("/etc/passwd".into()), &mut mounts);
+        let exists = access.resolve(OsFunctionCall::Exists("/etc/passwd".into()), &mut mounts);
         assert!(matches!(exists, ExtFunctionResult::Return(MontyObject::Bool(false))));
     }
 
@@ -502,7 +501,7 @@ mod tests {
         let access = OsAccess::builder().system_clock(false).build();
         let mut mounts = access.build_mount_table().unwrap();
 
-        let today = access.resolve(&OsFunctionCall::DateToday, &mut mounts);
+        let today = access.resolve(OsFunctionCall::DateToday, &mut mounts);
         match today {
             ExtFunctionResult::Error(exc) => assert_eq!(exc.exc_type(), ExcType::RuntimeError),
             other => panic!("expected a refusal, got {other:?}"),
@@ -513,7 +512,7 @@ mod tests {
     fn enabled_clock_returns_a_date() {
         let access = OsAccess::sandboxed();
         let mut mounts = access.build_mount_table().unwrap();
-        let today = access.resolve(&OsFunctionCall::DateToday, &mut mounts);
+        let today = access.resolve(OsFunctionCall::DateToday, &mut mounts);
         assert!(matches!(today, ExtFunctionResult::Return(MontyObject::Date(_))));
     }
 

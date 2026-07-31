@@ -21,12 +21,15 @@ filesystem access, an empty environment), but you can grant a script specific
 read-only or read-write paths and an explicit environment map (see
 [OS access](#os-access) below).
 
-## Why a separate crate (outside the workspace)?
+## Dependencies
 
-Monty is not on crates.io yet, so it is pulled in as a **git dependency** pinned
-to the `v0.0.18` release commit. A published workspace can't carry a git
-dependency, so this crate is its own workspace (note the empty `[workspace]`
-table in `Cargo.toml`) and is excluded from the root `adk-rust` workspace.
+Monty is on crates.io since `0.0.19`, so this crate is a regular member of the
+`adk-rust` workspace. It depends on three Monty crates that always resolve to
+the same release: [`monty`](https://crates.io/crates/monty) (the interpreter
+and run/repl surface), [`monty-types`](https://crates.io/crates/monty-types)
+(the types that cross the host boundary — `MontyObject`, `OsFunctionCall`,
+`ResourceLimits`, ...), and [`monty-fs`](https://crates.io/crates/monty-fs)
+(the boundary-enforcing filesystem `MountTable`).
 
 ## Usage
 
@@ -90,8 +93,7 @@ dispatched.
 ## Example
 
 A runnable example lives in
-[`examples/codeact_monty_agent`](../examples/codeact_monty_agent) (run it from
-that directory so its `rust-toolchain.toml` selects rustc 1.95+):
+[`examples/codeact_monty_agent`](../examples/codeact_monty_agent):
 
 ```bash
 cd examples/codeact_monty_agent && cargo run

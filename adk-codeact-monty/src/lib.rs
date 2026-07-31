@@ -57,7 +57,7 @@
 //!
 //! # Resource limits
 //!
-//! Cap a script's time, memory, or allocations with the builder — limits ride
+//! Cap a script's time or memory with the builder — limits ride
 //! along inside a serialized continuation, so a resumed run stays bounded:
 //!
 //! ```
@@ -86,4 +86,4 @@ pub use runtime::{MontyRuntime, MontyRuntimeBuilder};
 
 /// Re-export of Monty's resource-limit configuration, for
 /// [`MontyRuntimeBuilder::resource_limits`].
-pub use monty::ResourceLimits;
+pub use monty_types::ResourceLimits;

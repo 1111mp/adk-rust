@@ -37,8 +37,8 @@ expensive axes move to a later tier.
   with a targeted sandbox portability smoke, and `semver` (stable strict,
   everything else warn-only).
 - **Merge tier** (`ci-merge.yml`, on `push: main`) — cross-platform
-  `nextest --workspace` on macOS/Windows, the out-of-workspace Monty build, and
-  doc-example compilation. Runs post-merge; not branch-protection-required.
+  `nextest --workspace` on macOS/Windows and doc-example compilation. Runs
+  post-merge; not branch-protection-required.
 - **Nightly tier** (`ci-nightly.yml`, on `schedule`) — the feature-combination
   matrix (clippy with `-D warnings`), `cargo-audit`/`cargo-deny` supply-chain
   checks, and `#[ignore]` integration tests gated on available secrets. Not
@@ -149,6 +149,10 @@ adk-cli/         Command-line launcher for agents, `cargo adk deploy` for ADK Pl
 adk-rust-macros/ Procedural macros (#[tool] attribute with read_only, concurrency_safe,
                  long_running metadata)
 adk-code/        Code execution (experimental)
+adk-codeact-monty/ Python CodeRuntime for the CodeActAgent, backed by the Pydantic Monty
+                 interpreter (monty, monty-types, monty-fs from crates.io). Sandboxed
+                 OS access (mounts, environ, clock), suspend/resume snapshots.
+                 Workspace member; publish = false.
 adk-devtools/    Developer tools for coding agents — inner-loop file/search/edit tools
                  (read_file, write_file, edit_file, glob, grep, ...) scoped to a sandboxed workspace
 adk-bench/       Benchmarking framework: framework-level runtime performance with real LLM APIs

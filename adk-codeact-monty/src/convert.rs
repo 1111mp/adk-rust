@@ -7,8 +7,8 @@
 //!
 //! [`PendingCall`]: adk_agent::codeact::PendingCall
 
-use monty::{DictPairs, JsonMontyObject, MontyObject};
-use serde_json::Value;
+use monty_types::{DictPairs, MontyObject};
+use serde_json::{Map, Number, Value};
 
 /// Convert a host JSON value into a Monty value, to be injected into a script
 /// (a tool result, a resolved name, ...).
@@ -42,13 +42,49 @@ pub(crate) fn json_to_monty(value: Value) -> MontyObject {
 
 /// Convert a Monty value produced by a script into host JSON.
 ///
-/// Uses Monty's [`JsonMontyObject`] "natural" projection: JSON-native Python
-/// values serialize bare (`42`, `"hi"`, `[...]`, `{"a": 1}`); the rare
-/// non-JSON-native value (a `tuple`, `bytes`, ...) uses Monty's `{"$tag": ...}`
-/// convention. The CodeAct contract only cares that the top-level completion
-/// value is a tagged object, which a script's final `dict` expression always is.
+/// This is the "natural" projection: JSON-native Python values map to their
+/// bare JSON form (`42`, `"hi"`, `[...]`, `{"a": 1}`). It is deliberately *not*
+/// `serde_json::to_value(obj)` — [`MontyObject`]'s derived `Serialize` is an
+/// externally tagged snapshot format (`{"Int": 42}`) meant for binary
+/// transport, not human-facing JSON. The rare non-JSON-native value (a
+/// `tuple`, `bytes`, a `date`, ...) degrades to its Python `repr` string; the
+/// CodeAct contract only requires the top-level completion value to be a
+/// tagged object, which a script's final `dict` expression always is.
 pub(crate) fn monty_to_json(obj: &MontyObject) -> Value {
-    serde_json::to_value(JsonMontyObject(obj)).unwrap_or(Value::Null)
+    match obj {
+        MontyObject::None => Value::Null,
+        MontyObject::Bool(b) => Value::Bool(*b),
+        MontyObject::Int(i) => Value::Number(Number::from(*i)),
+        // NaN/Infinity have no JSON form; degrade to null rather than fail.
+        MontyObject::Float(f) => Number::from_f64(*f).map_or(Value::Null, Value::Number),
+        MontyObject::String(s) => Value::String(s.clone()),
+        MontyObject::Path(p) => Value::String(p.clone()),
+        // Every Python sequence projects to a JSON array.
+        MontyObject::List(items)
+        | MontyObject::Tuple(items)
+        | MontyObject::Set(items)
+        | MontyObject::FrozenSet(items) => Value::Array(items.iter().map(monty_to_json).collect()),
+        MontyObject::Dict(pairs) => dict_to_json(pairs),
+        // Everything else (bytes, datetimes, exceptions, file handles, ...) has
+        // no JSON-native shape, so it degrades to its Python `repr`. These never
+        // appear as a top-level CodeAct completion value.
+        other => Value::String(other.py_repr()),
+    }
+}
+
+/// Project a Monty `dict` to a JSON object, stringifying any non-string key
+/// via its Python `repr` (JSON object keys must be strings; script
+/// argument/result dicts are string-keyed in practice).
+fn dict_to_json(pairs: &DictPairs) -> Value {
+    let mut map = Map::new();
+    for (key, value) in pairs {
+        let key = match key {
+            MontyObject::String(s) => s.clone(),
+            other => other.py_repr(),
+        };
+        map.insert(key, monty_to_json(value));
+    }
+    Value::Object(map)
 }
 
 #[cfg(test)]

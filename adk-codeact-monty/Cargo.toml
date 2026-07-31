@@ -6,27 +6,37 @@ publish = false
 description = "Python CodeRuntime for the ADK-Rust CodeActAgent, backed by the Pydantic Monty interpreter"
 license = "MIT OR Apache-2.0"
 
-# This crate is intentionally OUTSIDE the adk-rust workspace: it depends on
-# `monty` via git (Monty is not yet on crates.io), and a git dependency cannot
-# live in a workspace that is published to crates.io. The empty `[workspace]`
-# table makes this directory its own workspace root; path dependencies still
-# point back into the adk-rust crates next door.
-[workspace]
-
 [dependencies]
-adk-core = { path = "../adk-core" }
-adk-agent = { path = "../adk-agent", features = ["codeact"] }
+adk-core = { workspace = true }
+adk-agent = { workspace = true, features = ["codeact"] }
 # Pydantic Monty — a minimal, secure, Rust-native Python interpreter for AI.
-# Pinned to the v0.0.18 release commit (the tag is not on crates.io).
-monty = { git = "https://github.com/pydantic/monty", rev = "45a3b2d57e6ce723fed4166fb032242ece74a663" }
-serde_json = "1.0"
+# On crates.io since 0.0.19, so this crate builds as a regular workspace member.
+# Monty keeps its modules private and re-exports only the run/repl surface; the
+# types that cross the host boundary (`MontyObject`, `OsFunctionCall`,
+# `ResourceLimits`, ...) live in `monty-types`, and the boundary-enforcing
+# filesystem `MountTable` lives in `monty-fs`. Cargo treats every `0.0.x` as its
+# own compatibility range, so `"0.0.19"` resolves to exactly the release monty
+# itself was built against and the three can never diverge.
+#
+# monty 0.0.19 pulls `ruff_python_ast 0.0.3`, whose `get-size` feature derives
+# `get_size2::GetSize` on `compact_str 0.9` fields; `get-size2 0.10.2+` moved to
+# `compact_str ^0.10`, so the derive stops resolving. `ruff_python_ast` accepts
+# `get-size2 ^0.10`, so the committed workspace Cargo.lock pins `get-size2` to
+# `0.10.1` (the last `compact_str ^0.9` release). Remove the pin once monty
+# upgrades past ruff_python_ast 0.0.3.
+monty = "0.0.19"
+monty-types = "0.0.19"
+monty-fs = "0.0.19"
+serde_json = { workspace = true }
 # `date.today()` / `datetime.now()` OS calls are serviced from the host clock
-# (see `os_access`). `clock` pulls in the local-timezone lookup.
+# (see `os_access`). `clock` pulls in the local-timezone lookup. Kept explicit
+# with `default-features = false` because the workspace default enables `serde`,
+# which this crate does not need.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
 # Only needed by the unit test that defines a sample `Tool`. The runnable
 # example lives in `examples/codeact_monty_agent` as a standalone crate.
-async-trait = "0.1"
+async-trait = { workspace = true }
 # Temp directories for the filesystem-access integration tests.
 tempfile = "3"

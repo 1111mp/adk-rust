@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **adk-codeact-monty joined the root workspace.** Monty is on crates.io since
+  `0.0.19`, so the crate's git dependency (and the empty `[workspace]` table it
+  forced) is gone: it now depends on `monty`, `monty-types`, and `monty-fs`
+  `0.0.19` from crates.io and is covered by the standard workspace gates
+  (`clippy`, `nextest`, docs) on every PR. The dedicated out-of-workspace CI
+  (`codeact-monty.yml`, the `out-of-workspace-monty` merge-tier job) is retired,
+  and `examples/codeact_monty_agent` compiles in the PR-tier examples gate. The
+  workspace `Cargo.lock` pins `get-size2` to `0.10.1` — `monty 0.0.19` pulls
+  `ruff_python_ast 0.0.3`, which derives `GetSize` on `compact_str 0.9` fields
+  while `get-size2 0.10.2+` moved to `compact_str 0.10`; the pin keeps the two
+  aligned until monty upgrades past `ruff_python_ast 0.0.3`. Porting to the
+  0.0.19 API: `MontyRuntimeBuilder::max_allocations` is removed (Monty's
+  `ResourceLimits` no longer counts allocations — the time/memory caps remain),
+  and per-step `print()` capture is capped at Monty's 10 MiB collector default
+  (exceeding it raises `MemoryError` in the script). The crate stays
+  `publish = false`.
+
 ## [2.0.0] - 2026-07-25
 
 ### Breaking

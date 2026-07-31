@@ -176,8 +176,8 @@ The intended production adapter is
 a `CodeRuntime` backed by [Pydantic Monty](https://github.com/pydantic/monty). It
 lets the model *act by writing Python*, runs in-process with no container or
 subprocess, and snapshots a paused run to bytes — exactly what suspend/resume
-needs. It is kept outside the workspace because Monty is currently a git
-dependency (not yet on crates.io) and requires rustc 1.95+.
+needs. It is a regular workspace member — Monty is on crates.io since `0.0.19`
+(crates `monty`, `monty-types`, and `monty-fs`) and requires rustc 1.95+.
 
 ```rust,ignore
 use adk_codeact_monty::MontyRuntime;

@@ -38,9 +38,10 @@
 //!
 //! # stdout
 //!
-//! Monty captures `print()` output per step (via `PrintWriter::CollectString`),
-//! which is attached to each [`RunStep`] so the agent can surface it back to the
-//! model.
+//! Monty captures `print()` output per step (via [`PrintWriter::collect_string`],
+//! capped at [`DEFAULT_MAX_PRINT_COLLECT_BYTES`](monty_types::DEFAULT_MAX_PRINT_COLLECT_BYTES)
+//! — exceeding it raises `MemoryError` in the script), which is attached to each
+//! [`RunStep`] so the agent can surface it back to the model.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,9 +50,10 @@ use adk_agent::codeact::{
     CodeRuntime, PendingCall, ResumeWith, RunStep, RuntimeCapabilities, RuntimeError,
 };
 use adk_core::Tool;
-use monty::{
-    ExcType, ExtFunctionResult, FunctionCall, LimitedTracker, MontyException, MontyObject,
-    MontyRun, NameLookupResult, PrintWriter, ResourceLimits, RunProgress,
+use monty::{FunctionCall, MontyRun, RunProgress};
+use monty_types::{
+    CompileOptions, ExcType, ExtFunctionResult, LimitedTracker, MontyException, MontyObject,
+    NameLookupResult, PrintWriter, ResourceLimits,
 };
 use serde_json::Value;
 
@@ -112,8 +114,8 @@ fn default_resource_limits() -> ResourceLimits {
 
 impl MontyRuntime {
     /// Create a runtime with conservative default resource limits suitable for
-    /// untrusted, LLM-generated code (see [`default_resource_limits`]): a
-    /// per-advance time cap, a memory cap, and Monty's recursion guard.
+    /// untrusted, LLM-generated code: 5s wall-clock per advance, 256 MiB
+    /// memory, and Monty's recursion guard.
     ///
     /// Relax or tighten these with [`MontyRuntime::builder`]; remove them
     /// entirely (trusted scripts only) with
@@ -149,9 +151,9 @@ pub struct MontyRuntimeBuilder {
 }
 
 impl MontyRuntimeBuilder {
-    /// Create a builder seeded with the conservative default limits (see
-    /// [`default_resource_limits`]) and a fully sandboxed OS policy (no
-    /// filesystem access, empty environment, host clock enabled).
+    /// Create a builder seeded with the conservative default limits (5s
+    /// wall-clock per advance, 256 MiB memory) and a fully sandboxed OS policy
+    /// (no filesystem access, empty environment, host clock enabled).
     #[must_use]
     pub fn new() -> Self {
         Self { limits: default_resource_limits(), extra_prompt: None, os: OsAccessBuilder::new() }
@@ -199,13 +201,6 @@ impl MontyRuntimeBuilder {
     #[must_use]
     pub fn max_memory(mut self, bytes: usize) -> Self {
         self.limits.max_memory = Some(bytes);
-        self
-    }
-
-    /// Cap the number of heap allocations a script may make.
-    #[must_use]
-    pub fn max_allocations(mut self, allocations: usize) -> Self {
-        self.limits.max_allocations = Some(allocations);
         self
     }
 
@@ -306,12 +301,17 @@ impl CodeRuntime for MontyRuntime {
     fn start(&self, script: &str, script_name: &str) -> Result<RunStep, RuntimeError> {
         // A parse/compile failure is the model's mistake: surface it as a
         // `RunStep::Raised` (fed back to the model), never a host `RuntimeError`.
-        let run = match MontyRun::new(script.to_string(), script_name, Vec::new()) {
+        let run = match MontyRun::new(
+            script.to_string(),
+            script_name,
+            Vec::new(),
+            CompileOptions::default(),
+        ) {
             Ok(run) => run,
             Err(exc) => return Ok(RunStep::raised(render_exception(&exc))),
         };
         let mut stdout = String::new();
-        match run.start(Vec::new(), self.tracker(), PrintWriter::CollectString(&mut stdout)) {
+        match run.start(Vec::new(), self.tracker(), PrintWriter::collect_string(&mut stdout)) {
             Ok(progress) => drive(progress, stdout, &self.os),
             // An exception raised during the first stretch of execution is a
             // script error: surface it as a Raised traceback, not a host error.
@@ -374,7 +374,7 @@ impl CodeRuntime for MontyRuntime {
 ///
 /// OS calls (filesystem, environment, clock) are serviced in-place against the
 /// [`OsAccess`] policy and resumed immediately — they are never tools and never
-/// pause the agent loop. A fresh [`MountTable`](monty::fs::MountTable) is built
+/// pause the agent loop. A fresh [`MountTable`](monty_fs::MountTable) is built
 /// once per drive so concurrent runs of the same runtime never share mount
 /// state.
 fn drive(
@@ -399,7 +399,7 @@ fn drive(
                 Err(message) => {
                     progress = match call.resume(
                         ExtFunctionResult::Error(monty_error(&message)),
-                        PrintWriter::CollectString(&mut stdout),
+                        PrintWriter::collect_string(&mut stdout),
                     ) {
                         Ok(next) => next,
                         Err(exc) => {
@@ -411,8 +411,12 @@ fn drive(
             RunProgress::OsCall(call) => {
                 // Resolve filesystem/env/clock access in-place against the
                 // host policy and resume immediately — never surfaced as a tool.
-                let result = os.resolve(&call.function_call, &mut mounts);
-                progress = match call.resume(result, PrintWriter::CollectString(&mut stdout)) {
+                // `resume_with` hands the call over by value so a write's
+                // payload moves into the mount backend without a copy.
+                progress = match call
+                    .resume_with(PrintWriter::collect_string(&mut stdout), |call| {
+                        os.resolve(call, &mut mounts)
+                    }) {
                     Ok(next) => next,
                     Err(exc) => {
                         return Ok(RunStep::raised(render_exception(&exc)).with_stdout(stdout));
@@ -423,7 +427,7 @@ fn drive(
                 // The runtime exposes tools only as *called* functions; a bare
                 // reference to an unknown name is a genuine NameError.
                 progress = match lookup
-                    .resume(NameLookupResult::Undefined, PrintWriter::CollectString(&mut stdout))
+                    .resume(NameLookupResult::Undefined, PrintWriter::collect_string(&mut stdout))
                 {
                     Ok(next) => next,
                     Err(exc) => {
@@ -444,7 +448,7 @@ fn drive(
                         )
                     })
                     .collect();
-                progress = match futures.resume(denied, PrintWriter::CollectString(&mut stdout)) {
+                progress = match futures.resume(denied, PrintWriter::collect_string(&mut stdout)) {
                     Ok(next) => next,
                     Err(exc) => {
                         return Ok(RunStep::raised(render_exception(&exc)).with_stdout(stdout));
@@ -604,7 +608,7 @@ fn resume_call(
         ResumeWith::Raise(message) => ExtFunctionResult::Error(monty_error(&message)),
     };
     let mut stdout = String::new();
-    match call.resume(result, PrintWriter::CollectString(&mut stdout)) {
+    match call.resume(result, PrintWriter::collect_string(&mut stdout)) {
         Ok(progress) => drive(progress, stdout, os),
         Err(exc) => Ok(RunStep::raised(render_exception(&exc)).with_stdout(stdout)),
     }

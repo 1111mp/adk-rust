@@ -1459,7 +1459,7 @@ fn runtime_err(err: RuntimeError) -> AdkError {
 /// Build one with [`CodeActAgent::builder`], supplying a [`Llm`] and a
 /// [`CodeRuntime`]. The agent then drives the CodeAct loop: each turn the model
 /// writes one script, tools are exposed as callable functions, and the script
-/// returns a tagged [`ScriptOutput`](crate::codeact::ScriptOutput).
+/// returns a tagged [`ScriptOutput`].
 ///
 /// # Example
 ///
@@ -2229,9 +2229,9 @@ impl CodeActAgentBuilder {
     /// Add a before-model callback, invoked before each model request.
     ///
     /// A callback may rewrite the request
-    /// ([`BeforeModelResult::Continue`](adk_core::BeforeModelResult::Continue))
+    /// ([`BeforeModelResult::Continue`])
     /// or skip the model call entirely with a synthetic response
-    /// ([`BeforeModelResult::Skip`](adk_core::BeforeModelResult::Skip)).
+    /// ([`BeforeModelResult::Skip`]).
     pub fn before_model_callback(mut self, callback: BeforeModelCallback) -> Self {
         self.before_model_callbacks.push(callback);
         self
