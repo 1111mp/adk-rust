@@ -317,6 +317,11 @@ let manager = CheckpointManager::new("session-1".to_string()).with_store(Arc::cl
 manager.flush().await?;
 
 let restored = CheckpointManager::restore("session-1".to_string(), store).await?;
+assert_eq!(restored.session_id(), "session-1");
+# Ok(())
+# }
+```
+
 ## Status reporting
 
 `ManagedAgentRuntime::status` reads the same handle the session loop writes to, so normal
