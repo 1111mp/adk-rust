@@ -36,6 +36,11 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 
+    # pyo3 0.28 — present only in the lockfile through jiter 0.15's disabled
+    # `python` feature. No workspace feature enables or compiles PyO3.
+    "RUSTSEC-2026-0176",
+    "RUSTSEC-2026-0177",
+
     # rsa — Marvin timing side-channel. No upstream fix exists.
     "RUSTSEC-2023-0071",
 
@@ -70,6 +75,7 @@ ignore = [
 # Permissive licenses plus MPL-2.0. MPL-2.0 is file-level copyleft, satisfied by
 # linking without relicensing this workspace; it arrives through the `symphonia`
 # audio decoders and the `cssparser`/`selectors` sanitizer stack.
+# Unicode-DFS-2016 covers the Unicode name tables embedded by Monty.
 allow = [
     "0BSD",
     "Apache-2.0",
@@ -85,6 +91,7 @@ allow = [
     "MPL-2.0",
     "NCSA",
     "Unicode-3.0",
+    "Unicode-DFS-2016",
     "Unlicense",
     "Zlib",
 ]

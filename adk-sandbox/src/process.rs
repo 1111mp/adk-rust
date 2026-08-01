@@ -388,6 +388,12 @@ impl ProcessBackend {
         // the compiler needs the same boundary as the binary it produces.
         let compile_result = {
             let mut cmd = Command::new(&self.config.rustc_path);
+            // Cargo applies the workspace's rust-lld setting, but this direct rustc
+            // invocation does not read .cargo/config.toml. Hosted Windows runners put
+            // Git's GNU `link.exe` ahead of MSVC on PATH, so naming rust-lld prevents
+            // rustc from launching the unrelated Unix utility.
+            #[cfg(windows)]
+            cmd.arg("-Clinker=rust-lld");
             cmd.arg(&src_path).arg("-o").arg(&bin_path);
             self.run_command_with_env(cmd, request, &Self::toolchain_env()).await?
         };
@@ -426,11 +432,21 @@ impl ProcessBackend {
 
     /// Executes a raw shell command via the platform shell.
     async fn execute_command(&self, request: &ExecRequest) -> Result<ExecResult, SandboxError> {
-        let cmd = if cfg!(windows) {
+        #[cfg(windows)]
+        let cmd = {
+            use std::os::windows::process::CommandExt;
+
             let mut c = Command::new("cmd");
-            c.arg("/C").arg(&request.code);
+            c.arg("/D").arg("/C");
+            // `cmd.exe` does not follow CommandLineToArgvW escaping. In particular,
+            // Command::arg turns embedded quotes into `\"`, which makes a quoted
+            // executable path part of the program name. The command is already an
+            // explicitly requested shell program, so pass it with cmd's own syntax.
+            c.as_std_mut().raw_arg(&request.code);
             c
-        } else {
+        };
+        #[cfg(not(windows))]
+        let cmd = {
             let mut c = Command::new("sh");
             c.arg("-c").arg(&request.code);
             c
@@ -706,6 +722,21 @@ mod tests {
         let result = backend.execute(request).await.unwrap();
         assert!(result.stdout.contains("hello"), "stdout: {}", result.stdout);
         assert_eq!(result.exit_code, 0);
+    }
+
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn test_command_supports_quoted_script_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("quoted helper.cmd");
+        std::fs::write(&script, "@echo quoted-path-ok\r\n").unwrap();
+
+        let backend = ProcessBackend::default();
+        let request = make_request(Language::Command, &format!("\"{}\"", script.display()));
+        let result = backend.execute(request).await.unwrap();
+
+        assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+        assert!(result.stdout.contains("quoted-path-ok"), "stdout: {}", result.stdout);
     }
 
     #[tokio::test]
