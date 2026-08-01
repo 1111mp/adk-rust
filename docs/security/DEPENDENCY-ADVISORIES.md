@@ -8,7 +8,7 @@ The purpose of this file is to provide transparency to consumers about the secur
 
 These accepted advisories are also configured in [`.cargo/audit.toml`](../../.cargo/audit.toml) so that `cargo audit` passes in CI while still surfacing new, unreviewed advisories.
 
-**Last reviewed:** 2026-07-26 (2.0.0 release review)
+**Last reviewed:** 2026-08-01 (2.0.0 release review)
 
 ---
 
@@ -19,10 +19,27 @@ These accepted advisories are also configured in [`.cargo/audit.toml`](../../.ca
 | RUSTSEC-2026-0193, RUSTSEC-2026-0213 | `ammonia` | Lockfile updated to 4.1.4. |
 | RUSTSEC-2026-0204 | `crossbeam-epoch` | Lockfile updated to 0.9.20. |
 | RUSTSEC-2026-0194, RUSTSEC-2026-0195 | `quick-xml` (declared) | `adk-eval` now requires quick-xml 0.41. The transitive 0.26 copy is covered below. |
+| RUSTSEC-2026-0222, RUSTSEC-2026-0223 | `wasmtime` | Lockfile updated from 46.0.1 to 46.0.2. |
 
 ---
 
 ## Active Advisories
+
+### RUSTSEC-2026-0176, RUSTSEC-2026-0177 — pyo3 0.28: memory and thread safety
+
+- **Crate:** `pyo3` (0.28.3)
+- **Severity:** Memory safety
+- **Advisories:**
+  - [RUSTSEC-2026-0176](https://rustsec.org/advisories/RUSTSEC-2026-0176) — out-of-bounds reads in list and tuple iterator skipping
+  - [RUSTSEC-2026-0177](https://rustsec.org/advisories/RUSTSEC-2026-0177) — missing `Sync` bound on Python-callable closures
+- **ADK Impact:** `adk-codeact-monty` → `monty 0.0.19` → `jiter 0.15`. Jiter declares PyO3 as an optional dependency for its `python` feature, so Cargo records it in `Cargo.lock` even when that feature is disabled.
+- **Status:** Patched in PyO3 0.29. Monty 0.0.19 requires jiter 0.15, whose Python feature requires PyO3 0.28; the compatible jiter 0.16 line is outside Monty's version constraint.
+- **Disposition:** Accepted risk — dependency feature is unreachable
+- **Conditions:** Both advisories require PyO3 code to be compiled and the affected Python APIs to be called.
+- **ADK-Specific Context:** No workspace feature enables `jiter/python`; `cargo tree --workspace --all-features -i pyo3@0.28.3` has no reachable package. CodeAct uses jiter's pure-Rust parser through Monty.
+- **Mitigation:** Keep the advisory exceptions synchronized in `.cargo/audit.toml` and `deny.toml`. Remove them when Monty upgrades to a jiter release using PyO3 0.29 or later.
+
+---
 
 ### RUSTSEC-2026-0194, RUSTSEC-2026-0195 — quick-xml 0.26: parser denial of service
 
