@@ -9,11 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adk-sandbox's optional dependencies are no longer scoped to Unix.** Every
+  optional dependency sat below a `[target.'cfg(unix)'.dependencies]` header, so
+  `wasmtime` and `wasmtime-wasi` were unix-only and the `wasm` feature could not
+  build on Windows, while `windows-sys` — declared for the AppContainer path —
+  could never be selected on any platform. The optional dependencies move back to
+  `[dependencies]` and `windows-sys` gets a `cfg(windows)` block.
+- **The workspace builds clean on Windows.** Three `collapsible_if` violations
+  failed `clippy -D warnings` in code paths no CI job compiled: one in
+  `cargo-adk` behind `#[cfg(not(unix))]`, two in `adk-rust`'s `run()` that only
+  compile at the `standard` tier and above. An `unneeded_return` in
+  `adk-sandbox`'s Windows enforcer surfaced once the manifest fix made that
+  module compile.
+- **adk-bench's external-runner tests run on a stock Windows host.** They invoked
+  `sh` and a bare `echo`, neither of which a plain Windows install provides, and
+  passing a shell one-liner as an argument corrupted any embedded JSON because
+  `cmd.exe` does not implement `CommandLineToArgvW` escaping. The tests now write
+  a temporary script — PowerShell on Windows, `sh` elsewhere — so no payload
+  crosses the command line.
+- **adk-sandbox's `a_working_program_still_runs` no longer fails outside a
+  Developer shell.** The `compile_lib=true` assertion covers `LIB` forwarding,
+  which has nothing to forward when the host has no `LIB` set. It now states that
+  precondition instead of failing; the `runtime_lib=false` isolation assertion is
+  unconditional as before.
 - **adk-sandbox now preserves Windows shell quoting and selects the intended Rust
   linker.** Raw command text reaches `cmd.exe` without `CommandLineToArgvW`
   escaping, so quoted executable and script paths work. Direct sandboxed Rust
   compilation uses the toolchain's `rust-lld` instead of accidentally resolving
   Git's unrelated GNU `link.exe` from `PATH` on hosted Windows runners.
+
+### Added
+
+- **`scripts/setup-dev.ps1` — first-time setup for Windows.** `make setup`,
+  `scripts/setup-dev.sh`, and `devenv shell` all require a POSIX shell, so
+  Windows had no scripted path. Checks the toolchain and MSVC environment,
+  installs `sccache`, `cargo-nextest`, `protoc`, and NASM, verifies `bash` and
+  `python3` resolve, registers lefthook, and persists `RUSTC_WRAPPER`,
+  `CMAKE_POLICY_VERSION_MINIMUM`, and `PROTOC`. `-Check` reports without
+  changing anything.
+- **`scripts/setup-dev.sh` now checks `cargo-nextest` and `protoc`.** Both are
+  required by gates that CI installs for itself, so a missing local copy failed
+  the build while CI stayed green.
+- **PSScriptAnalyzer pre-commit gate.** `scripts/lint-powershell.ps1` backs a new
+  lefthook hook for staged `*.ps1`, the PowerShell counterpart to the shellcheck
+  gate. Skips itself when the module is not installed.
 
 ### Security
 

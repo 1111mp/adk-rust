@@ -122,10 +122,23 @@ fn main() {
         "the MSVC library path leaked into the produced program: {}",
         result.stdout
     );
+
+    // The forwarding half only has something to forward when the host itself has
+    // `LIB` set, which on Windows means a Developer shell (or `vcvars64.bat`).
+    // Asserting it unconditionally turns an unconfigured shell into a test
+    // failure and hides the isolation assertion above, which is the one that
+    // matters. CI runs under a Developer environment, so coverage is unchanged.
     #[cfg(windows)]
-    assert!(
-        result.stdout.contains("compile_lib=true"),
-        "rustc did not receive the MSVC library path: {}",
-        result.stdout
-    );
+    if std::env::var_os("LIB").is_some() {
+        assert!(
+            result.stdout.contains("compile_lib=true"),
+            "rustc did not receive the MSVC library path: {}",
+            result.stdout
+        );
+    } else {
+        eprintln!(
+            "skipping the compile_lib assertion: LIB is not set on this host, so there is \
+             nothing for the sandbox to forward. Run from a Developer PowerShell to cover it."
+        );
+    }
 }
