@@ -610,16 +610,16 @@ fn handle_build(manifest_path: Option<PathBuf>, debug: bool) -> Result<(), Strin
                     }
                     #[cfg(not(unix))]
                     {
-                        if ext == "exe" {
-                            if let Ok(meta) = path.metadata() {
-                                let size = meta.len();
-                                println!(
-                                    "   binary:  {} ({:.1} MB)",
-                                    path.display(),
-                                    size as f64 / 1_048_576.0
-                                );
-                                found_binary = true;
-                            }
+                        if ext == "exe"
+                            && let Ok(meta) = path.metadata()
+                        {
+                            let size = meta.len();
+                            println!(
+                                "   binary:  {} ({:.1} MB)",
+                                path.display(),
+                                size as f64 / 1_048_576.0
+                            );
+                            found_binary = true;
                         }
                     }
                 }

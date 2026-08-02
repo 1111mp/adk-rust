@@ -4,13 +4,150 @@ Rust Agent Development Kit — a modular workspace of publishable crates for bui
 
 ## Dev environment
 
-- Rust 1.95.0+, edition 2024. Use `make setup` or `devenv shell` to bootstrap.
+- Rust 1.95.0+, edition 2024, pinned by `rust-toolchain.toml` — rustup installs it on the
+  first `cargo` invocation, so do not pass `+stable` or `+nightly`.
+- New clone? See [First-time setup](#first-time-setup) for the per-platform tool matrix.
 - `sccache` is the compilation cache. Set `RUSTC_WRAPPER=sccache` in your shell profile.
-- On Linux, `wild` is the linker (configured in `.cargo/config.toml`). macOS uses the default linker.
+- Linkers are set in `.cargo/config.toml`: `wild` on Linux (devenv-provided), the
+  default on macOS, `rust-lld` on Windows MSVC.
 - Copy `.env.example` to `.env` for API keys. Never commit `.env` files or secrets.
 - `adk-mistralrs` is a workspace member using workspace version inheritance. GPU features (`cuda`, `metal`) are opt-in.
-- `CMAKE_POLICY_VERSION_MINIMUM=3.5` is needed for cmake 4.x compatibility (audiopus).
 - **Performance**: `.cargo/config.toml` sets `incremental = false` globally for `sccache` compatibility, but `Cargo.toml` `[profile.dev]` overrides this with `incremental = true` for local dev builds. CI uses the `ci` profile where the config.toml setting applies.
+
+### First-time setup
+
+`devenv shell` is the reproducible path on Linux and macOS and needs nothing below.
+Everything else runs one setup script, which is idempotent and has a
+report-only mode:
+
+```bash
+./scripts/setup-dev.sh            # Linux, macOS
+./scripts/setup-dev.sh --check    # report without changing anything
+```
+
+```powershell
+./scripts/setup-dev.ps1           # Windows
+./scripts/setup-dev.ps1 -Check    # report without changing anything
+```
+
+Both scripts check the toolchain, `cargo-nextest`, `protoc`, NASM, `cmake`, and
+lefthook, then report the environment variables the build expects. The Windows
+script additionally verifies `bash` and `python3` resolve, installs `protoc`,
+NASM, and nextest from prebuilt archives into `~/.local`, and persists
+`RUSTC_WRAPPER`, `CMAKE_POLICY_VERSION_MINIMUM`, and `PROTOC` for the user.
+Tools with no unattended installer (Visual Studio Build Tools, Git for Windows,
+Python) are reported with a download link.
+
+CONTRIBUTING.md ("Dev Environment Setup") is the contributor-facing walkthrough;
+the rest of this section is the per-platform tool matrix and the reason each tool
+exists.
+
+**Build tools.** Which ones you need depends on the features you build. A
+default `cargo check --workspace` needs none of them; the rows below are what the
+feature-gated builds and the `full` tier require.
+
+| Tool | Needed for | Linux | macOS | Windows |
+|------|-----------|-------|-------|---------|
+| `protoc` | `adk-rag --features lancedb` (lance build script) | `apt install protobuf-compiler` | `brew install protobuf` | [prebuilt release](https://github.com/protocolbuffers/protobuf/releases), then set `PROTOC` |
+| NASM | `aws-lc-sys` on MSVC — any rustls path, e.g. `adk-auth --features sso` | not needed | not needed | [nasm.us](https://www.nasm.us/), add to `PATH` |
+| `cmake` | `openai-webrtc` (audiopus builds Opus from source) | `apt install cmake` | `brew install cmake` | [get-cmake](https://github.com/lukka/get-cmake) or the official installer |
+| `bash` / `sh` | Shell-tool and external-runner tests across `adk-bench`, `adk-devtools`, `adk-managed`, `adk-sandbox`, `adk-tool` | preinstalled | preinstalled | [Git for Windows](https://git-scm.com/download/win) ships them in `Git\bin`, which the installer leaves off `PATH` — add it |
+| `python3` | `adk-sandbox` process-execution tests | preinstalled | preinstalled | [python.org](https://www.python.org/downloads/) — ensure `python3` resolves, not just `python` |
+| WebDriver | `adk-browser` examples | Chrome/Chromium | Chrome/Chromium | Chrome/Chromium |
+
+CI installs `protoc` on every `feature-coverage` runner and sets `PROTOC=protoc`
+(see `.github/workflows/ci.yml`), so a missing `protoc` fails locally while CI
+stays green. The same applies to NASM on Windows.
+
+**Environment variables.** Both setup scripts report these; the PowerShell one
+persists them.
+
+| Variable | Value | Why |
+|----------|-------|-----|
+| `RUSTC_WRAPPER` | `sccache` | Compilation cache; cuts rebuild times substantially |
+| `CMAKE_POLICY_VERSION_MINIMUM` | `3.5` | cmake 4.x compatibility (audiopus) |
+| `PROTOC` | path to `protoc` | Only when `protoc` is not on `PATH` |
+
+```bash
+# Linux / macOS — add to ~/.bashrc or ~/.zshrc
+export RUSTC_WRAPPER=sccache
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+```
+
+```powershell
+# Windows — persist for the current user
+setx RUSTC_WRAPPER sccache
+setx CMAKE_POLICY_VERSION_MINIMUM 3.5
+```
+
+**Git hooks.** Both setup scripts install lefthook and run `lefthook install`.
+Lefthook is not on crates.io, so the Windows script uses npm and falls back to
+pointing at the [prebuilt releases](https://github.com/evilmartians/lefthook/releases).
+
+### Platform notes
+
+**Linux.** `.cargo/config.toml` pins `wild` as the linker for Linux targets, and
+only the devenv/nix shell provides it. Outside that shell, either install `wild`
+or strip the three `[target.*]` linker sections — the shared
+`.github/actions/setup-rust` action does the latter on plain runners
+(`neutralize-wild`) and is the reference for which sections to remove.
+
+**macOS.** Uses the default linker; no linker setup required.
+
+**Windows.** `make setup`, `./scripts/setup-dev.sh`, and `devenv shell` are all
+bash-only, so use `./scripts/setup-dev.ps1`. Use the MSVC toolchain
+(`x86_64-pc-windows-msvc`) with Visual Studio Build Tools for the C/C++
+compiler; `.cargo/config.toml` pins `rust-lld` as the linker, which ships with
+rustup. Three further constraints:
+
+- `adk-sandbox`'s Windows AppContainer enforcer is unimplemented and reports
+  itself unavailable — `sandbox-windows` compiles but does not enforce.
+- Nine tests shell out to `bash`, `sh`, or `python3` and fail with
+  `program not found` without them. Git for Windows installs a shell but leaves
+  `C:\Program Files\Git\bin` off `PATH` (only `Git\cmd` is added), and the
+  python.org installer creates no `python3.exe`. Add `Git\bin` to `PATH` and copy
+  `python.exe` to `python3.exe` in your Python directory.
+- Run the suite from a Developer PowerShell, or `call vcvars64.bat` first.
+  `adk-sandbox` forwards `LIB` from the parent environment so `rustc` can reach
+  the MSVC linker (`ProcessBackend::toolchain_env`), so
+  `a_working_program_still_runs` fails in a plain shell where `LIB` is unset.
+- Keep Git's `usr/bin` off `PATH` ahead of the toolchain: it ships a GNU
+  `link.exe` that shadows the MSVC linker, which once made sandboxed Rust
+  compilation resolve the wrong one. The same directory holds the only `echo`
+  binary on Windows (`echo` is a cmd builtin), so
+  `adk-bench`'s `test_external_runner_invalid_json` cannot pass without
+  accepting that hazard. It is the one expected Windows failure.
+
+### Verifying a fresh setup
+
+Start with the three gates:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
+```
+
+A default `--workspace` build compiles no feature-gated module and no umbrella
+tier above `minimal`, so those need their own pass:
+
+```bash
+# Feature-gated modules — mirrors the PR-tier feature-coverage matrix
+cargo clippy -p adk-agent --features codeact --all-targets -- -D warnings
+
+# Umbrella tiers — `standard` and above compile code `minimal` never reaches
+cargo clippy -p adk-rust --features full --all-targets -- -D warnings
+
+# Doctests — nextest does not run them
+cargo test -p adk-rust --features full --doc
+```
+
+On Linux and macOS a clean setup runs the full suite with zero failures. On
+Windows, expect 4050/4051 from a Developer PowerShell — the single failure is
+`test_external_runner_invalid_json`, explained under
+[Platform notes](#platform-notes). Any failure carrying `program not found` is a
+missing host tool, not a regression — diagnose the environment before assuming
+the workspace is broken.
 
 ## Quality gates
 
@@ -50,7 +187,9 @@ Status Checks") for the authoritative required-check set.
 ### Local git hooks (lefthook)
 
 - **pre-commit** — `cargo fmt --all -- --check`, `cargo clippy --workspace
-  --all-targets -- -D warnings`, and `shellcheck` on staged shell scripts.
+  --all-targets -- -D warnings`, `shellcheck` on staged shell scripts, and
+  PSScriptAnalyzer on staged `*.ps1` via `scripts/lint-powershell.ps1` (skips
+  itself when the module is not installed).
 - **pre-push** — `cargo check --workspace` (a fast compilation check, not the full
   test suite). CI is the full-suite safety net, so the local gate stays quick.
 
