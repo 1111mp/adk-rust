@@ -1,8 +1,9 @@
 //! Schema normalization cache for LLM provider adapters.
 //!
-//! Caches normalized schemas keyed by a content hash of the serialized JSON,
-//! avoiding redundant normalization when the same tool schema is encountered
-//! across multiple requests.
+//! Caches normalized schemas keyed by a content hash, avoiding redundant
+//! normalization when the same tool schema is encountered across multiple
+//! requests. The hash ignores the order object keys were written in, so one
+//! schema built two different ways is one entry.
 //!
 //! # Example
 //!
@@ -48,6 +49,59 @@ use crate::SchemaAdapter;
 #[derive(Debug, Default)]
 pub struct SchemaCache {
     entries: Mutex<HashMap<u64, Value>>,
+}
+
+/// Adds a value to the hash in a fixed order.
+///
+/// - **Object keys are sorted first.** The order they were written in cannot
+///   change the hash.
+/// - **Nothing is copied.** This runs on every lookup, including ones that hit.
+/// - **Each kind of value gets its own marker.** The text `"1"` and the number
+///   `1` hash differently.
+fn hash_canonical(value: &Value, hasher: &mut DefaultHasher) {
+    match value {
+        Value::Null => 0u8.hash(hasher),
+        Value::Bool(flag) => {
+            1u8.hash(hasher);
+            flag.hash(hasher);
+        }
+        Value::Number(number) => {
+            2u8.hash(hasher);
+            // `Number` is not `Hash`. Integers keep their exact value; a float
+            // hashes by its bits, which is sound because `Value` cannot hold NaN.
+            if let Some(unsigned) = number.as_u64() {
+                0u8.hash(hasher);
+                unsigned.hash(hasher);
+            } else if let Some(signed) = number.as_i64() {
+                1u8.hash(hasher);
+                signed.hash(hasher);
+            } else if let Some(float) = number.as_f64() {
+                2u8.hash(hasher);
+                float.to_bits().hash(hasher);
+            }
+        }
+        Value::String(text) => {
+            3u8.hash(hasher);
+            text.hash(hasher);
+        }
+        Value::Array(items) => {
+            4u8.hash(hasher);
+            items.len().hash(hasher);
+            for item in items {
+                hash_canonical(item, hasher);
+            }
+        }
+        Value::Object(members) => {
+            5u8.hash(hasher);
+            members.len().hash(hasher);
+            let mut entries: Vec<(&String, &Value)> = members.iter().collect();
+            entries.sort_unstable_by_key(|(key, _)| *key);
+            for (key, member) in entries {
+                key.hash(hasher);
+                hash_canonical(member, hasher);
+            }
+        }
+    }
 }
 
 impl SchemaCache {
@@ -135,14 +189,18 @@ impl SchemaCache {
         self.len() == 0
     }
 
-    /// Computes a 64-bit hash of the serialized schema bytes.
+    /// Computes a 64-bit hash of the schema's contents.
     ///
-    /// Uses `serde_json::to_vec` for deterministic serialization and
-    /// `DefaultHasher` (SipHash) for the hash function.
+    /// Object keys are sorted before hashing, so the order they were written in
+    /// does not change the result. `serde_json` keeps keys in insertion order,
+    /// so without this the same schema built two different ways would occupy two
+    /// entries and be normalized twice.
+    ///
+    /// Numbers are hashed as written: `5` and `5.0` are separate entries. That
+    /// costs an extra normalization and never returns the wrong schema.
     fn hash_schema(schema: &Value) -> u64 {
-        let bytes = serde_json::to_vec(schema).unwrap_or_default();
         let mut hasher = DefaultHasher::new();
-        bytes.hash(&mut hasher);
+        hash_canonical(schema, &mut hasher);
         hasher.finish()
     }
 }
@@ -269,5 +327,60 @@ mod tests {
         // GenericSchemaAdapter passes through non-object values
         assert_eq!(result, Value::Null);
         assert_eq!(cache.len(), 1);
+    }
+
+    /// Two schemas differing only in key order are one schema, so they share a
+    /// cache entry rather than each paying for normalization.
+    #[test]
+    fn key_order_does_not_create_a_second_entry() {
+        let cache = SchemaCache::new();
+        let adapter = GenericSchemaAdapter;
+
+        cache.get_or_normalize(
+            &json!({ "type": "object", "properties": { "a": {}, "b": {} } }),
+            &adapter,
+        );
+        cache.get_or_normalize(
+            &json!({ "properties": { "b": {}, "a": {} }, "type": "object" }),
+            &adapter,
+        );
+
+        assert_eq!(cache.len(), 1, "key order must not change a schema's identity");
+    }
+
+    #[test]
+    fn genuinely_different_schemas_keep_separate_entries() {
+        let cache = SchemaCache::new();
+        let adapter = GenericSchemaAdapter;
+
+        cache.get_or_normalize(&json!({ "type": "string" }), &adapter);
+        cache.get_or_normalize(&json!({ "type": "integer" }), &adapter);
+
+        assert_eq!(cache.len(), 2);
+    }
+
+    /// A property name containing pointer or escape syntax must not collapse
+    /// two schemas onto one key.
+    #[test]
+    fn unusual_property_names_stay_distinct() {
+        let cache = SchemaCache::new();
+        let adapter = GenericSchemaAdapter;
+
+        cache.get_or_normalize(&json!({ "properties": { "a/b": {} } }), &adapter);
+        cache.get_or_normalize(&json!({ "properties": { "a~b": {} } }), &adapter);
+
+        assert_eq!(cache.len(), 2);
+    }
+
+    /// Text and a number that render alike must not collide.
+    #[test]
+    fn a_string_and_a_number_hash_differently() {
+        let cache = SchemaCache::new();
+        let adapter = GenericSchemaAdapter;
+
+        cache.get_or_normalize(&json!({ "const": "1" }), &adapter);
+        cache.get_or_normalize(&json!({ "const": 1 }), &adapter);
+
+        assert_eq!(cache.len(), 2);
     }
 }
