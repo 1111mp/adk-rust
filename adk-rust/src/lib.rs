@@ -1140,22 +1140,22 @@ pub async fn run(instructions: &str, input: &str) -> Result<String> {
 
         #[cfg(feature = "anthropic")]
         {
-            if result.is_none() {
-                if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-                    let m = model::anthropic::AnthropicClient::from_api_key(key)?;
-                    result = Some((Arc::new(m), None));
-                }
+            if result.is_none()
+                && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
+            {
+                let m = model::anthropic::AnthropicClient::from_api_key(key)?;
+                result = Some((Arc::new(m), None));
             }
         }
 
         #[cfg(feature = "openai")]
         {
-            if result.is_none() {
-                if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-                    let config = model::openai::OpenAIConfig::new(key, "gpt-4o-mini");
-                    let m = model::openai::OpenAIClient::new(config)?;
-                    result = Some((Arc::new(m), None));
-                }
+            if result.is_none()
+                && let Ok(key) = std::env::var("OPENAI_API_KEY")
+            {
+                let config = model::openai::OpenAIConfig::new(key, "gpt-4o-mini");
+                let m = model::openai::OpenAIClient::new(config)?;
+                result = Some((Arc::new(m), None));
             }
         }
 

@@ -70,6 +70,17 @@ pre-commit:
       glob: "*.sh"
       run: shellcheck --severity=warning {staged_files}
       fail_text: "shellcheck found issues. Run `shellcheck --severity=warning <file>` to see them."
+    # PowerShell counterpart to the shellcheck gate, for scripts/*.ps1 (Windows
+    # has no POSIX shell, so setup-dev.ps1 is the only Windows setup path). The
+    # logic lives in scripts/lint-powershell.ps1 because lefthook pipes commands
+    # through `sh` on Unix, which would mangle an inline script's `$` variables.
+    # `powershell` is the 5.1 interpreter every Windows host ships; `pwsh` is
+    # PowerShell 7 and is not guaranteed to be installed.
+    psscriptanalyzer:
+      tags: lint
+      glob: "*.ps1"
+      run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/lint-powershell.ps1 {staged_files}
+      fail_text: "PSScriptAnalyzer found issues. Run `./scripts/lint-powershell.ps1 <file>` to see them."
 
 pre-push:
   commands:

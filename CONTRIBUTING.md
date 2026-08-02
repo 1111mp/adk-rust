@@ -97,10 +97,15 @@ cargo nextest run --workspace
 
 ### Prerequisites
 
-- Rust 1.95.0+ (edition 2024)
-- For browser examples: Chrome/Chromium
+- Rust 1.95.0+ (edition 2024), pinned by `rust-toolchain.toml`
+- `cargo-nextest` — backs the test gate: `cargo install cargo-nextest --locked`
+- For `adk-rag --features lancedb`: `protoc` (lance's build script requires it)
 - For `openai-webrtc` feature: cmake (audiopus builds Opus from source)
+- For browser examples: Chrome/Chromium
 - For mistral.rs: see [adk-mistralrs section](#adk-mistralrs)
+- On Windows: Visual Studio Build Tools (C/C++), NASM (`aws-lc-sys` needs it on
+  MSVC), plus full Git for Windows and Python — nine tests shell out to `bash`,
+  `sh`, or `python3`
 
 ### Dev Environment Setup
 
@@ -110,12 +115,26 @@ We provide three ways to set up your development environment:
 
 If you use [devenv](https://devenv.sh), just run `devenv shell`. This gives you identical toolchains on Linux, macOS, and CI — Rust, sccache, mold, cmake, Node.js, and everything else pinned to known-good versions.
 
-**Option B: Setup script (brew/apt)**
+**Option B: Setup script**
+
+On Linux and macOS (uses brew/apt/dnf):
 
 ```bash
 ./scripts/setup-dev.sh          # Install recommended tools
 ./scripts/setup-dev.sh --check  # Just check what's installed
 ```
+
+On Windows (devenv and the bash script both need a POSIX shell):
+
+```powershell
+./scripts/setup-dev.ps1         # Install recommended tools
+./scripts/setup-dev.ps1 -Check  # Just check what's installed
+```
+
+Both scripts are idempotent, and both check the feature-gated build tools —
+`protoc` for `adk-rag --features lancedb`, and NASM for `aws-lc-sys` on Windows
+MSVC. Missing either one fails the build locally while CI stays green, because
+CI installs them on every runner.
 
 **Option C: Manual**
 

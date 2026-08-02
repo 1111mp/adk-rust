@@ -115,6 +115,40 @@ else
 fi
 
 echo ""
+echo "Test runner (quality gate):"
+
+# cargo-nextest backs one of the three quality gates, and no other installer
+# provides it — `cargo test` does not substitute (it skips nextest's isolation).
+if command -v cargo-nextest &>/dev/null; then
+  ok "cargo-nextest $(cargo nextest --version 2>/dev/null | head -1 | awk '{print $2}')"
+else
+  miss "cargo-nextest — required by the test gate"
+  if ! $CHECK_ONLY; then
+    echo "  Installing cargo-nextest via cargo..."
+    cargo install cargo-nextest --locked 2>/dev/null || \
+      warn "could not install cargo-nextest — see https://nexte.st/docs/installation/"
+  fi
+fi
+
+echo ""
+echo "Feature-gated build tools:"
+
+# protoc — lance's build script needs it, so `adk-rag --features lancedb` cannot
+# compile without it. CI installs it on every feature-coverage runner, so a
+# missing local copy fails while CI stays green.
+if command -v protoc &>/dev/null; then
+  ok "protoc $(protoc --version | awk '{print $2}')"
+else
+  miss "protoc — needed for adk-rag --features lancedb"
+  install_pkg protoc protobuf protobuf-compiler
+fi
+
+# NASM is only consumed by aws-lc-sys on MSVC targets, so Unix hosts never need
+# it. Reported rather than silently skipped so the check output matches the
+# tool matrix in AGENTS.md on every platform.
+ok "nasm — not needed on $OS (aws-lc-sys requires it only on Windows MSVC)"
+
+echo ""
 echo "Frontend tooling (ADK Studio UI):"
 
 if command -v node &>/dev/null; then
