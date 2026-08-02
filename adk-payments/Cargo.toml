@@ -43,7 +43,7 @@ axum = { version = "0.8", features = ["macros"], optional = true }
 
 [dev-dependencies]
 http-body-util = "0.1"
-jsonschema = { version = "0.45", default-features = false }
+jsonschema = { workspace = true }
 serde_yaml = "0.9"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
 tower = { version = "0.5", features = ["util"] }

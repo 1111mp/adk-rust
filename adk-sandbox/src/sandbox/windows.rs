@@ -129,13 +129,13 @@ impl SandboxEnforcer for WindowsEnforcer {
             //
             // This requires careful Win32 API usage and is deferred to a
             // Windows-specific implementation pass.
-            return Err(SandboxError::EnforcerFailed {
+            Err(SandboxError::EnforcerFailed {
                 enforcer: "appcontainer".to_string(),
                 message: "Windows AppContainer configuration not yet implemented. \
                           The enforcer structure is in place; Win32 API calls \
                           will be added in a Windows-specific implementation pass."
                     .to_string(),
-            });
+            })
         }
 
         #[cfg(not(target_os = "windows"))]
