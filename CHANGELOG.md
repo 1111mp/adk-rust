@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **adk-sandbox now preserves Windows shell quoting and selects the intended Rust
+  linker.** Raw command text reaches `cmd.exe` without `CommandLineToArgvW`
+  escaping, so quoted executable and script paths work. Direct sandboxed Rust
+  compilation uses the toolchain's `rust-lld` instead of accidentally resolving
+  Git's unrelated GNU `link.exe` from `PATH` on hosted Windows runners.
+
+### Security
+
+- **Wasmtime is updated to 46.0.2.** This resolves RUSTSEC-2026-0222 and
+  RUSTSEC-2026-0223. The PyO3 0.28 advisories are documented as unreachable:
+  PyO3 exists only in the lockfile through jiter's disabled `python` feature,
+  and no workspace feature compiles it. The supply-chain license policy now
+  recognizes Monty's OSI-approved Unicode-DFS-2016 data license.
+
 ### Changed
 
 - **adk-codeact-monty joined the root workspace.** Monty is on crates.io since

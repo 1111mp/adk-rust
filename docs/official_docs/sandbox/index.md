@@ -34,10 +34,10 @@ Two things about the process backend worth knowing:
   compiled by a command built outside the shared path, so the compile had no enforcer
   wrapper, no timeout, and no process group. That matters because compilation is not
   inert: `include_str!` reads files and procedural macros run arbitrary code before the
-  produced binary exists. The compile phase does receive toolchain variables (`PATH`,
-  `SDKROOT`, `DEVELOPER_DIR`, `HOME`, `TMPDIR`, `RUSTUP_HOME`, `CARGO_HOME`) when they
-  are set, because `rustc` cannot invoke a linker without them; an OS enforcer is what
-  constrains that phase.
+  produced binary exists. The compile phase receives a platform-specific toolchain
+  allow-list; on Windows this includes `LIB` and uses the Rust toolchain's `rust-lld`
+  linker so an unrelated `link.exe` earlier on `PATH` cannot be selected. An OS
+  enforcer is what constrains that phase.
 
 ### Environment Precedence
 
