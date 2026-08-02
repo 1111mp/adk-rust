@@ -2,8 +2,9 @@
 //!
 //! Caches normalized schemas keyed by a content hash, avoiding redundant
 //! normalization when the same tool schema is encountered across multiple
-//! requests. The hash ignores the order object keys were written in, so one
-//! schema built two different ways is one entry.
+//! requests. The hash ignores the order object keys were written in, so when
+//! `serde_json/preserve_order` is enabled — where insertion order would
+//! otherwise change the key — one schema built two different ways is one entry.
 //!
 //! # Example
 //!
@@ -55,7 +56,8 @@ pub struct SchemaCache {
 ///
 /// - **Object keys are sorted first.** The order they were written in cannot
 ///   change the hash.
-/// - **Nothing is copied.** This runs on every lookup, including ones that hit.
+/// - **No JSON values are cloned.** Object members are collected into a
+///   temporary `Vec` for sorting; this runs on every lookup, including hits.
 /// - **Each kind of value gets its own marker.** The text `"1"` and the number
 ///   `1` hash differently.
 fn hash_canonical(value: &Value, hasher: &mut DefaultHasher) {
@@ -67,18 +69,12 @@ fn hash_canonical(value: &Value, hasher: &mut DefaultHasher) {
         }
         Value::Number(number) => {
             2u8.hash(hasher);
-            // `Number` is not `Hash`. Integers keep their exact value; a float
-            // hashes by its bits, which is sound because `Value` cannot hold NaN.
-            if let Some(unsigned) = number.as_u64() {
-                0u8.hash(hasher);
-                unsigned.hash(hasher);
-            } else if let Some(signed) = number.as_i64() {
-                1u8.hash(hasher);
-                signed.hash(hasher);
-            } else if let Some(float) = number.as_f64() {
-                2u8.hash(hasher);
-                float.to_bits().hash(hasher);
-            }
+            // The textual form, because it is exact in every build. Going
+            // through `as_f64` loses precision when `serde_json` is built with
+            // `arbitrary_precision`, where a literal wider than f64 is kept
+            // verbatim: distinct numbers would round together and share a cache
+            // entry, and a literal outside f64 entirely would hash to nothing.
+            number.to_string().hash(hasher);
         }
         Value::String(text) => {
             3u8.hash(hasher);
@@ -192,9 +188,9 @@ impl SchemaCache {
     /// Computes a 64-bit hash of the schema's contents.
     ///
     /// Object keys are sorted before hashing, so the order they were written in
-    /// does not change the result. `serde_json` keeps keys in insertion order,
-    /// so without this the same schema built two different ways would occupy two
-    /// entries and be normalized twice.
+    /// does not change the result. When `serde_json/preserve_order` is enabled,
+    /// keys stay in insertion order, and without sorting the same schema built
+    /// two different ways would occupy two entries and be normalized twice.
     ///
     /// Numbers are hashed as written: `5` and `5.0` are separate entries. That
     /// costs an extra normalization and never returns the wrong schema.
@@ -380,6 +376,26 @@ mod tests {
 
         cache.get_or_normalize(&json!({ "const": "1" }), &adapter);
         cache.get_or_normalize(&json!({ "const": 1 }), &adapter);
+
+        assert_eq!(cache.len(), 2);
+    }
+
+    /// Numbers are identified by their written form, so `5` and `5.0` are
+    /// different schemas.
+    ///
+    /// This also closes an `arbitrary_precision` hazard that cannot be
+    /// exercised here: with that feature a literal wider than f64 is kept
+    /// verbatim, and identifying numbers by `as_f64` would round distinct
+    /// values onto one cache entry. Without the feature `serde_json` already
+    /// collapses such literals during parsing, so reproducing it would mean
+    /// enabling the feature for every crate in the build.
+    #[test]
+    fn numbers_are_identified_by_their_written_form() {
+        let cache = SchemaCache::new();
+        let adapter = GenericSchemaAdapter;
+
+        cache.get_or_normalize(&json!({ "const": 5 }), &adapter);
+        cache.get_or_normalize(&json!({ "const": 5.0 }), &adapter);
 
         assert_eq!(cache.len(), 2);
     }
