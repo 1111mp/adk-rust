@@ -24,7 +24,7 @@ regex = { workspace = true }
 tracing = { workspace = true }
 
 # Optional: JSON Schema validation
-jsonschema = { version = "0.45", optional = true, default-features = false }
+jsonschema = { workspace = true, optional = true }
 
 [features]
 default = ["schema"]

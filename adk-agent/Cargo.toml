@@ -30,7 +30,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 schemars = "1.0"
-jsonschema = { version = "0.28", default-features = false }
+jsonschema = { workspace = true }
 cron = { version = "0.15", optional = true }
 notify = { version = "8", optional = true }
 axum = { version = "0.8", optional = true }
