@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`LlmAgent` skill injection preserves prompt-cache prefixes.** Contextual
+  skills are injected into the current user turn instead of leading the request,
+  so stable instructions and prior conversation history remain reusable by
+  provider prompt caches across turns.
 - **adk-sandbox's optional dependencies are no longer scoped to Unix.** Every
   optional dependency sat below a `[target.'cfg(unix)'.dependencies]` header, so
   `wasmtime` and `wasmtime-wasi` were unix-only and the `wasm` feature could not
