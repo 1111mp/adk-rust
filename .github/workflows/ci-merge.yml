@@ -51,7 +51,11 @@ jobs:
       uses: ./.github/actions/setup-rust
       with:
         neutralize-wild: 'false'
+        # Keep the existing main cache prefixes, but replace the automatic job
+        # id with an explicit shared key. PR compile jobs can now restore these
+        # entries without invalidating the already-warm main caches.
         cache-key: cross-platform-test-${{ matrix.os }}
+        cache-shared-key: cross-platform-test
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
