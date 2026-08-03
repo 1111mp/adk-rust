@@ -18,6 +18,10 @@ inputs:
     description: 'Prefix for the build cache.'
     required: false
     default: ${{ github.job }}
+  enable-cache:
+    description: 'Enable the persistent Rust build cache.'
+    required: false
+    default: 'true'
   neutralize-wild:
     description: >-
       Strip the Linux `wild` linker sections from .cargo/config.toml. Set to
@@ -53,6 +57,7 @@ runs:
     #    caller-supplied prefix; rust-cache appends the Cargo.lock hash itself,
     #    so a dependency change cannot be masked by a stale cache.
     - name: Configure Rust build cache
+      if: inputs.enable-cache == 'true'
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
         prefix-key: ${{ inputs.cache-key }}

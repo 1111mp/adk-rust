@@ -34,7 +34,7 @@ jobs:
       uses: ./.github/actions/setup-rust
       with:
         components: rustfmt
-        cache-key: fmt
+        enable-cache: 'false'
 
     - name: Check formatting
       run: cargo fmt --all -- --check
