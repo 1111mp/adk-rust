@@ -138,6 +138,7 @@ version = "2.0.0"
 dependencies = [
  "adk-core",
  "async-trait",
+ "find-msvc-tools",
  "libc",
  "serde",
  "serde_json",
