@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Inline and file content metadata survives session persistence.**
+  `Part::InlineData`, `Part::FileData`, `Part::FunctionResponse`, and multimodal
+  function-response parts retain optional annotations; inline data also retains
+  its optional source URI. ACP image conversion now round-trips both fields, and
+  Vertex sessions route metadata-bearing content through lossless `rawEvent`
+  persistence. Existing payloads continue to deserialize with empty metadata.
+- **MCP tool annotations now control per-tool safety metadata.** Discovered
+  `readOnlyHint` and `idempotentHint` values flow into ADK tool metadata,
+  automatic dispatch, and reconnect replay decisions. Tools without hints keep
+  the conservative sequential, no-replay defaults.
+- **Schema caches keep adapter results isolated.** `SchemaCache` binds one
+  `SchemaAdapter` instance at construction, so the same input schema cannot
+  return a result produced by another provider or adapter configuration. The
+  deprecated per-call adapter API also keys entries by normalized output to
+  preserve correctness during migration.
+- **`LlmAgent` skill injection preserves prompt-cache prefixes.** Contextual
+  skills are injected into the current user turn instead of leading the request,
+  so stable instructions and prior conversation history remain reusable by
+  provider prompt caches across turns.
 - **adk-sandbox's optional dependencies are no longer scoped to Unix.** Every
   optional dependency sat below a `[target.'cfg(unix)'.dependencies]` header, so
   `wasmtime` and `wasmtime-wasi` were unix-only and the `wasm` feature could not
@@ -39,6 +58,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Git's unrelated GNU `link.exe` from `PATH` on hosted Windows runners.
 
 ### Added
+
+- **adk-realtime: `DisconnectReason`, so a closed stream can say why.**
+  `RealtimeSession::disconnect_reason()` reports the close code and reason the
+  provider sent, and `RealtimeRunner::disconnect_reason()` forwards it. The
+  Gemini session records its close frame before the event stream ends.
+
+  Applications that *poll* `RealtimeRunner::next_event()` never reach the
+  runner's `on_disconnect` dispatch, and `next_event` returns a bare `None`
+  whether the provider deliberately closed an idle session or the socket died.
+  Both therefore landed in the caller's terminal record as the same generic
+  stream failure — one that reads like a network defect when it was a policy
+  close. Google's Live API closes an idle session with `1008` and
+  `"The operation was aborted."`; that string was reachable in logs but nowhere
+  a durable record could use it.
+
+  The trait method is defaulted to `None`, so existing `RealtimeSession`
+  implementations are unaffected and this is not a breaking change.
 
 - **`scripts/setup-dev.ps1` — first-time setup for Windows.** `make setup`,
   `scripts/setup-dev.sh`, and `devenv shell` all require a POSIX shell, so

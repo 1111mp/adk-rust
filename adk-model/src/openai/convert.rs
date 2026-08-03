@@ -42,10 +42,10 @@ pub fn content_to_message(content: &Content) -> ChatCompletionRequestMessage {
                                 },
                             ))
                         }
-                        Part::InlineData { mime_type, data } => {
+                        Part::InlineData { mime_type, data, .. } => {
                             Some(inline_data_part_to_openai(mime_type, data))
                         }
-                        Part::FileData { mime_type, file_uri } => {
+                        Part::FileData { mime_type, file_uri, .. } => {
                             if mime_type.starts_with("image/") {
                                 Some(ChatCompletionRequestUserMessageContentPart::ImageUrl(
                                     ChatCompletionRequestMessageContentPartImage {
@@ -125,7 +125,9 @@ pub fn content_to_message(content: &Content) -> ChatCompletionRequestMessage {
         }
         "function" | "tool" => {
             // Tool response message
-            if let Some(Part::FunctionResponse { function_response, id }) = content.parts.first() {
+            if let Some(Part::FunctionResponse { function_response, id, .. }) =
+                content.parts.first()
+            {
                 let tool_call_id = id.clone().unwrap_or_else(|| "unknown".to_string());
                 ChatCompletionRequestToolMessageArgs::default()
                     .tool_call_id(tool_call_id)
@@ -250,7 +252,7 @@ pub fn convert_tools(
             let parameters = decl
                 .get("parameters")
                 .cloned()
-                .map(|schema| cache.get_or_normalize(&schema, adapter))
+                .map(|schema| cache.normalize(&schema))
                 .or_else(|| Some(adapter.empty_schema()));
 
             ChatCompletionTools::Function(ChatCompletionTool {
@@ -482,10 +484,7 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "What is in this image?".to_string() },
-                Part::InlineData {
-                    mime_type: "image/png".to_string(),
-                    data: vec![0x89, 0x50, 0x4E, 0x47], // PNG magic bytes
-                },
+                Part::inline_data("image/png", vec![0x89, 0x50, 0x4E, 0x47]), // PNG magic bytes
             ],
         };
         let msg = content_to_message(&content);
@@ -523,8 +522,8 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "Compare these".to_string() },
-                Part::InlineData { mime_type: "image/jpeg".to_string(), data: vec![0xFF, 0xD8] },
-                Part::InlineData { mime_type: "image/png".to_string(), data: vec![0x89, 0x50] },
+                Part::inline_data("image/jpeg", vec![0xFF, 0xD8]),
+                Part::inline_data("image/png", vec![0x89, 0x50]),
             ],
         };
         let msg = content_to_message(&content);
@@ -546,10 +545,7 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "Transcribe this".to_string() },
-                Part::InlineData {
-                    mime_type: "audio/wav".to_string(),
-                    data: vec![0x52, 0x49, 0x46, 0x46],
-                },
+                Part::inline_data("audio/wav", vec![0x52, 0x49, 0x46, 0x46]),
             ],
         };
         let msg = content_to_message(&content);
@@ -573,10 +569,7 @@ mod tests {
     fn test_user_message_with_pdf_inline_data_falls_back_to_text_part() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::InlineData {
-                mime_type: "application/pdf".to_string(),
-                data: b"%PDF".to_vec(),
-            }],
+            parts: vec![Part::inline_data("application/pdf", b"%PDF".to_vec())],
         };
         let msg = content_to_message(&content);
 
@@ -604,6 +597,7 @@ mod tests {
             parts: vec![Part::FileData {
                 mime_type: "application/pdf".to_string(),
                 file_uri: "https://example.com/report.pdf".to_string(),
+                annotations: None,
             }],
         };
         let msg = content_to_message(&content);
@@ -634,6 +628,7 @@ mod tests {
                 Part::FileData {
                     mime_type: "image/jpeg".to_string(),
                     file_uri: "https://example.com/photo.jpg".to_string(),
+                    annotations: None,
                 },
             ],
         };
@@ -800,7 +795,7 @@ mod tests {
         );
 
         let adapter = OpenAiSchemaAdapter;
-        let cache = SchemaCache::new();
+        let cache = SchemaCache::for_adapter(std::sync::Arc::new(OpenAiSchemaAdapter));
         let openai_tools = convert_tools(&tools, &adapter, &cache);
         assert_eq!(openai_tools.len(), 1);
         if let ChatCompletionTools::Function(tool) = &openai_tools[0] {
@@ -820,13 +815,11 @@ mod tests {
     #[test]
     fn test_image_detail_serializes_as_auto_not_null() {
         for part in [
-            Part::InlineData {
-                mime_type: "image/png".to_string(),
-                data: vec![0x89, 0x50, 0x4E, 0x47],
-            },
+            Part::inline_data("image/png", vec![0x89, 0x50, 0x4E, 0x47]),
             Part::FileData {
                 mime_type: "image/jpeg".to_string(),
                 file_uri: "https://example.com/photo.jpg".to_string(),
+                annotations: None,
             },
         ] {
             let content = Content {

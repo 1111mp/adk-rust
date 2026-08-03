@@ -301,10 +301,13 @@ The refresher handles these error conditions automatically:
 - Session not found (server restart)
 - Connection reset
 
-Discovery calls reconnect and retry automatically. `tools/call` does not replay
-by default because a lost response can leave a mutating tool's external result
-uncertain. Opt in only for read-only tools or operations protected by a stable
-provider idempotency guarantee:
+Discovery calls reconnect and retry automatically. Discovered tool wrappers
+also replay when the server publishes `readOnlyHint: true` or
+`idempotentHint: true`. Missing hints keep replay disabled because a lost
+response can leave a mutating tool's external result uncertain. The direct
+`call_tool_value` and `ConnectionRefresher::call_tool` paths do not have
+discovered per-tool metadata; opt them in only for read-only tools or operations
+protected by a stable provider idempotency guarantee:
 
 ```rust
 let refresher = ConnectionRefresher::new(client, Arc::new(factory))
@@ -314,6 +317,9 @@ let toolset = McpToolset::new(client)
     .with_connection_factory(Arc::new(factory))
     .with_tool_call_retries();
 ```
+
+MCP annotations are server-published hints. Trust them only for servers inside
+the application's security boundary.
 
 ### Google Search
 

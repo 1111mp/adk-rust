@@ -10,10 +10,10 @@
 //! | ACP `ContentBlock`                     | [`adk_core::Part`]                              |
 //! |----------------------------------------|-------------------------------------------------|
 //! | `Text`                                 | `Part::Text`                                    |
-//! | `Image { data, mime_type, uri? }`      | `Part::InlineData { mime_type, data }` (uri dropped) |
-//! | `Audio { data, mime_type }`            | `Part::InlineData { mime_type, data }`          |
+//! | `Image { data, mime_type, uri? }`      | `Part::InlineData { mime_type, data, uri, annotations }` |
+//! | `Audio { data, mime_type }`            | `Part::InlineData { mime_type, data, annotations }` |
 //! | `ResourceLink`                         | `Part::Text` (human-readable reference)         |
-//! | `ResourceLink` (outbound)              | `Part::FileData { mime_type, file_uri }`        |
+//! | `ResourceLink` (outbound)              | `Part::FileData { mime_type, file_uri, annotations }` |
 //! | `Resource { resource: Text }`          | `Part::EmbeddedResource(Text)`                  |
 //! | `Resource { resource: Blob }`          | `Part::EmbeddedResource(Blob)` (base64 decode)  |
 //!
@@ -26,7 +26,7 @@ use adk_core::{
     TextResourceContents,
 };
 use agent_client_protocol::schema::v1::{
-    AudioContent, BlobResourceContents as AcpBlobResourceContents, ContentBlock,
+    Annotations, AudioContent, BlobResourceContents as AcpBlobResourceContents, ContentBlock,
     EmbeddedResource as AcpEmbeddedResource, EmbeddedResourceResource, ImageContent, ResourceLink,
     TextContent, TextResourceContents as AcpTextResourceContents,
 };
@@ -64,11 +64,21 @@ pub fn block_to_part(block: &ContentBlock) -> Result<Part, AcpError> {
         ContentBlock::Text(text) => Ok(Part::Text { text: text.text.clone() }),
         ContentBlock::Image(image) => {
             let data = decode_base64(&image.data)?;
-            Ok(Part::InlineData { mime_type: image.mime_type.clone(), data })
+            Ok(Part::InlineData {
+                mime_type: image.mime_type.clone(),
+                data,
+                uri: image.uri.clone(),
+                annotations: annotations_to_value(image.annotations.as_ref())?,
+            })
         }
         ContentBlock::Audio(audio) => {
             let data = decode_base64(&audio.data)?;
-            Ok(Part::InlineData { mime_type: audio.mime_type.clone(), data })
+            Ok(Part::InlineData {
+                mime_type: audio.mime_type.clone(),
+                data,
+                uri: None,
+                annotations: annotations_to_value(audio.annotations.as_ref())?,
+            })
         }
         ContentBlock::ResourceLink(link) => Ok(Part::Text { text: resource_link_text(link) }),
         ContentBlock::Resource(resource) => embedded_resource_to_part(resource),
@@ -106,23 +116,36 @@ pub fn part_to_block(part: &Part) -> Option<ContentBlock> {
     match part {
         Part::Text { text } => Some(ContentBlock::Text(TextContent::new(text.clone()))),
         Part::InlineData { data, .. } if data.len() > MAX_INLINE_DATA_SIZE => None,
-        Part::InlineData { mime_type, data } if mime_type.starts_with("audio/") => {
+        Part::InlineData { mime_type, data, annotations, .. }
+            if mime_type.starts_with("audio/") =>
+        {
             let encoded = general_purpose::STANDARD.encode(data);
-            Some(ContentBlock::Audio(AudioContent::new(encoded, mime_type.clone())))
+            Some(ContentBlock::Audio(
+                AudioContent::new(encoded, mime_type.clone())
+                    .annotations(annotations_from_value(annotations.as_ref())),
+            ))
         }
-        Part::InlineData { mime_type, data } if mime_type.starts_with("image/") => {
+        Part::InlineData { mime_type, data, uri, annotations }
+            if mime_type.starts_with("image/") =>
+        {
             let encoded = general_purpose::STANDARD.encode(data);
-            Some(ContentBlock::Image(ImageContent::new(encoded, mime_type.clone())))
+            Some(ContentBlock::Image(
+                ImageContent::new(encoded, mime_type.clone())
+                    .uri(uri.clone())
+                    .annotations(annotations_from_value(annotations.as_ref())),
+            ))
         }
         Part::InlineData { .. } => None,
-        Part::FileData { mime_type, file_uri } => {
+        Part::FileData { mime_type, file_uri, annotations } => {
             let name = file_uri
                 .rsplit('/')
                 .find(|segment| !segment.is_empty())
                 .unwrap_or(file_uri)
                 .to_string();
             Some(ContentBlock::ResourceLink(
-                ResourceLink::new(name, file_uri.clone()).mime_type(Some(mime_type.clone())),
+                ResourceLink::new(name, file_uri.clone())
+                    .mime_type(Some(mime_type.clone()))
+                    .annotations(annotations_from_value(annotations.as_ref())),
             ))
         }
         Part::EmbeddedResource { resource } => embedded_resource_to_block(resource),
@@ -151,7 +174,7 @@ pub fn part_to_block(part: &Part) -> Option<ContentBlock> {
 ///
 /// let mut content = Content::new("user");
 /// content.parts.push(Part::Text { text: "describe this".into() });
-/// content.parts.push(Part::InlineData { mime_type: "image/png".into(), data: vec![1, 2, 3] });
+/// content.parts.push(Part::inline_data("image/png", vec![1, 2, 3]));
 ///
 /// let blocks = content_to_blocks(&content);
 /// assert_eq!(blocks.len(), 2);
@@ -232,6 +255,19 @@ fn decode_base64(data: &str) -> Result<Vec<u8>, AcpError> {
     Ok(decoded)
 }
 
+fn annotations_to_value(
+    annotations: Option<&Annotations>,
+) -> Result<Option<serde_json::Value>, AcpError> {
+    annotations
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|error| AcpError::Protocol(format!("invalid ACP annotations: {error}")))
+}
+
+fn annotations_from_value(annotations: Option<&serde_json::Value>) -> Option<Annotations> {
+    annotations.and_then(|value| serde_json::from_value(value.clone()).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,8 +304,29 @@ mod tests {
         let block = ContentBlock::Image(ImageContent::new(encoded, "image/png"));
         let part = block_to_part(&block).expect("image maps");
         assert!(
-            matches!(part, Part::InlineData { mime_type, data } if mime_type == "image/png" && data == raw)
+            matches!(part, Part::InlineData { mime_type, data, .. } if mime_type == "image/png" && data == raw)
         );
+    }
+
+    #[test]
+    fn image_uri_and_annotations_round_trip() {
+        let annotations = Annotations::new().priority(Some(0.8));
+        let block = ContentBlock::Image(
+            ImageContent::new(general_purpose::STANDARD.encode([1_u8, 2, 3]), "image/png")
+                .uri(Some("file:///screenshots/result.png".to_string()))
+                .annotations(Some(annotations.clone())),
+        );
+
+        let part = block_to_part(&block).expect("image maps");
+        assert_eq!(part.uri(), Some("file:///screenshots/result.png"));
+        assert_eq!(part.annotations(), Some(&serde_json::to_value(&annotations).unwrap()));
+
+        let round_tripped = part_to_block(&part).expect("image maps back");
+        let ContentBlock::Image(image) = round_tripped else {
+            panic!("expected image block");
+        };
+        assert_eq!(image.uri.as_deref(), Some("file:///screenshots/result.png"));
+        assert_eq!(image.annotations, Some(annotations));
     }
 
     #[test]
@@ -279,7 +336,7 @@ mod tests {
         let block = ContentBlock::Audio(AudioContent::new(encoded, "audio/mp3"));
         let part = block_to_part(&block).expect("audio maps");
         assert!(
-            matches!(part, Part::InlineData { mime_type, data } if mime_type == "audio/mp3" && data == raw)
+            matches!(part, Part::InlineData { mime_type, data, .. } if mime_type == "audio/mp3" && data == raw)
         );
     }
 
@@ -424,7 +481,7 @@ mod tests {
 
     #[test]
     fn inline_audio_part_maps_to_audio_block() {
-        let part = Part::InlineData { mime_type: "audio/wav".into(), data: vec![1, 2, 3] };
+        let part = Part::inline_data("audio/wav", vec![1, 2, 3]);
         match part_to_block(&part) {
             Some(ContentBlock::Audio(audio)) => {
                 assert_eq!(audio.mime_type, "audio/wav");
@@ -436,7 +493,7 @@ mod tests {
 
     #[test]
     fn inline_image_part_maps_to_image_block() {
-        let part = Part::InlineData { mime_type: "image/png".into(), data: vec![9, 8, 7] };
+        let part = Part::inline_data("image/png", vec![9, 8, 7]);
         match part_to_block(&part) {
             Some(ContentBlock::Image(image)) => {
                 assert_eq!(image.mime_type, "image/png");
@@ -448,13 +505,14 @@ mod tests {
 
     #[test]
     fn outbound_binary_mapping_rejects_unsupported_or_oversized_payloads() {
-        let unsupported =
-            Part::InlineData { mime_type: "application/octet-stream".into(), data: vec![1, 2, 3] };
+        let unsupported = Part::inline_data("application/octet-stream", vec![1, 2, 3]);
         assert!(part_to_block(&unsupported).is_none());
 
         let oversized = Part::InlineData {
             mime_type: "image/png".into(),
             data: vec![0; MAX_INLINE_DATA_SIZE + 1],
+            uri: None,
+            annotations: None,
         };
         assert!(part_to_block(&oversized).is_none());
 
@@ -473,6 +531,7 @@ mod tests {
         let part = Part::FileData {
             mime_type: "application/pdf".into(),
             file_uri: "https://example.com/reports/quarterly.pdf".into(),
+            annotations: None,
         };
         match part_to_block(&part) {
             Some(ContentBlock::ResourceLink(link)) => {
@@ -513,11 +572,12 @@ mod tests {
     fn content_to_blocks_maps_rich_content_and_skips_unrepresentable_parts() {
         let mut content = Content::new("user");
         content.parts.push(Part::Text { text: "describe these".into() });
-        content.parts.push(Part::InlineData { mime_type: "image/png".into(), data: vec![1, 2, 3] });
-        content.parts.push(Part::InlineData { mime_type: "audio/wav".into(), data: vec![4, 5, 6] });
+        content.parts.push(Part::inline_data("image/png", vec![1, 2, 3]));
+        content.parts.push(Part::inline_data("audio/wav", vec![4, 5, 6]));
         content.parts.push(Part::FileData {
             mime_type: "application/pdf".into(),
             file_uri: "file:///reports/result.pdf".into(),
+            annotations: None,
         });
         content.parts.push(Part::EmbeddedResource {
             resource: EmbeddedResource::Text(TextResourceContents::new(

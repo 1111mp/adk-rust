@@ -66,7 +66,7 @@ pub fn content_to_message(
                 };
                 Some(ContentBlock::ToolUse(block))
             }
-            Part::FunctionResponse { function_response, id } => {
+            Part::FunctionResponse { function_response, id, .. } => {
                 Some(ContentBlock::ToolResult(ToolResultBlock {
                     tool_use_id: id.clone().unwrap_or_else(|| "unknown".to_string()),
                     content: Some(tool_result_content(&function_response.response)),
@@ -74,7 +74,7 @@ pub fn content_to_message(
                     cache_control: None,
                 }))
             }
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 let media_type = match mime_type.as_str() {
                     "image/jpeg" => Some(ImageMediaType::Jpeg),
                     "image/png" => Some(ImageMediaType::Png),
@@ -107,7 +107,7 @@ pub fn content_to_message(
                     ))))
                 }
             }
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, .. } => {
                 if mime_type == "application/pdf" {
                     Some(ContentBlock::Document(DocumentBlock::new_with_url_pdf(
                         UrlPdfSource::new(file_uri.clone()),
@@ -227,7 +227,7 @@ pub fn convert_tools(
 
             let input_schema =
                 decl.get("parameters").cloned().unwrap_or_else(|| adapter.empty_schema());
-            let normalized_schema = cache.get_or_normalize(&input_schema, adapter);
+            let normalized_schema = cache.normalize(&input_schema);
 
             let normalized_name = adapter.normalize_tool_name(name);
 
@@ -512,10 +512,7 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "What is in this image?".to_string() },
-                Part::InlineData {
-                    mime_type: "image/png".to_string(),
-                    data: vec![0x89, 0x50, 0x4E, 0x47],
-                },
+                Part::inline_data("image/png", vec![0x89, 0x50, 0x4E, 0x47]),
             ],
         };
         let msg = content_to_message(&content, false).unwrap();
@@ -540,10 +537,10 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "Check this".to_string() },
-                Part::InlineData {
-                    mime_type: "audio/wav".to_string(), // Not supported by Anthropic images
-                    data: vec![0x52, 0x49, 0x46, 0x46],
-                },
+                Part::inline_data(
+                    "audio/wav", // Not supported by Anthropic images
+                    vec![0x52, 0x49, 0x46, 0x46],
+                ),
             ],
         };
         let msg = content_to_message(&content, false).unwrap();
@@ -563,8 +560,8 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "Compare".to_string() },
-                Part::InlineData { mime_type: "image/jpeg".to_string(), data: vec![0xFF, 0xD8] },
-                Part::InlineData { mime_type: "image/webp".to_string(), data: vec![0x52, 0x49] },
+                Part::inline_data("image/jpeg", vec![0xFF, 0xD8]),
+                Part::inline_data("image/webp", vec![0x52, 0x49]),
             ],
         };
         let msg = content_to_message(&content, false).unwrap();
@@ -580,10 +577,7 @@ mod tests {
     fn test_content_to_message_pdf_inline_data_maps_to_document_block() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::InlineData {
-                mime_type: "application/pdf".to_string(),
-                data: b"%PDF-1.4".to_vec(),
-            }],
+            parts: vec![Part::inline_data("application/pdf", b"%PDF-1.4".to_vec())],
         };
         let msg = content_to_message(&content, false).unwrap();
 
@@ -599,10 +593,7 @@ mod tests {
     fn test_content_to_message_pdf_file_uri_maps_to_document_block() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::FileData {
-                mime_type: "application/pdf".to_string(),
-                file_uri: "https://example.com/test.pdf".to_string(),
-            }],
+            parts: vec![Part::file_data("application/pdf", "https://example.com/test.pdf")],
         };
         let msg = content_to_message(&content, false).unwrap();
 
@@ -620,10 +611,7 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "Describe this".to_string() },
-                Part::FileData {
-                    mime_type: "image/jpeg".to_string(),
-                    file_uri: "https://example.com/photo.jpg".to_string(),
-                },
+                Part::file_data("image/jpeg", "https://example.com/photo.jpg"),
             ],
         };
         let msg = content_to_message(&content, false).unwrap();
@@ -641,10 +629,7 @@ mod tests {
     fn test_content_to_message_webp_file_data_maps_to_url_image() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::FileData {
-                mime_type: "image/webp".to_string(),
-                file_uri: "https://example.com/image.webp".to_string(),
-            }],
+            parts: vec![Part::file_data("image/webp", "https://example.com/image.webp")],
         };
         let msg = content_to_message(&content, false).unwrap();
 
@@ -659,10 +644,7 @@ mod tests {
     fn test_content_to_message_unsupported_file_data_falls_back_to_text() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::FileData {
-                mime_type: "audio/wav".to_string(),
-                file_uri: "https://example.com/audio.wav".to_string(),
-            }],
+            parts: vec![Part::file_data("audio/wav", "https://example.com/audio.wav")],
         };
         let msg = content_to_message(&content, false).unwrap();
 
@@ -691,7 +673,7 @@ mod tests {
         );
 
         let adapter = AnthropicSchemaAdapter;
-        let cache = SchemaCache::new();
+        let cache = SchemaCache::for_adapter(std::sync::Arc::new(AnthropicSchemaAdapter));
         let claude_tools =
             convert_tools(&tools, &adapter, &cache).expect("tool conversion should succeed");
         assert_eq!(claude_tools.len(), 1);
@@ -712,7 +694,7 @@ mod tests {
         );
 
         let adapter = AnthropicSchemaAdapter;
-        let cache = SchemaCache::new();
+        let cache = SchemaCache::for_adapter(std::sync::Arc::new(AnthropicSchemaAdapter));
         let claude_tools =
             convert_tools(&tools, &adapter, &cache).expect("tool conversion should succeed");
         assert_eq!(claude_tools.len(), 1);
@@ -731,6 +713,7 @@ mod tests {
                     Value::String("hello".to_string()),
                 ),
                 id: Some("tool_123".to_string()),
+                annotations: None,
             }],
         };
 

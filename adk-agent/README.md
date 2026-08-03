@@ -150,6 +150,10 @@ let agent = LlmAgentBuilder::new("assistant")
     .build()?;
 ```
 
+The selected skill is injected into the current user turn, after global and
+agent instructions plus prior conversation history. This keeps the stable
+prompt prefix reusable by provider prompt caches across turns.
+
 Skills are also supported on all workflow agents (`LoopAgent`, `SequentialAgent`, `ParallelAgent`, `ConditionalAgent`, `LlmConditionalAgent`).
 
 ### Workflow Agents

@@ -2011,10 +2011,13 @@ async fn test_vertex_content_round_trip_preserves_supported_parts() {
             Part::InlineData {
                 mime_type: "application/octet-stream".to_string(),
                 data: vec![0, 1, 2, 253, 254, 255],
+                uri: None,
+                annotations: None,
             },
             Part::FileData {
                 mime_type: "image/png".to_string(),
                 file_uri: "gs://bucket/image.png".to_string(),
+                annotations: None,
             },
             Part::FunctionCall {
                 name: "lookup".to_string(),
@@ -2029,13 +2032,17 @@ async fn test_vertex_content_round_trip_preserves_supported_parts() {
                     inline_data: vec![InlineDataPart {
                         mime_type: "image/gif".to_string(),
                         data: vec![71, 73, 70],
+                        uri: None,
+                        annotations: None,
                     }],
                     file_data: vec![FileDataPart {
                         mime_type: "application/pdf".to_string(),
                         file_uri: "gs://bucket/result.pdf".to_string(),
+                        annotations: None,
                     }],
                 },
                 id: None,
+                annotations: None,
             },
         ],
     });

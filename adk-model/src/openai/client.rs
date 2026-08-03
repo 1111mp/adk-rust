@@ -184,7 +184,8 @@ impl Llm for AzureOpenAIClient {
         // Normalize tool schemas at request time using the schema adapter.
         let adapter = self.schema_adapter();
         use std::sync::LazyLock;
-        static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(SchemaCache::new);
+        static SCHEMA_CACHE: LazyLock<SchemaCache> =
+            LazyLock::new(|| SchemaCache::for_adapter(std::sync::Arc::new(OpenAiSchemaAdapter)));
         let request_body =
             build_request_json(&deployment_id, &request, &None, true, adapter, &SCHEMA_CACHE)?;
 

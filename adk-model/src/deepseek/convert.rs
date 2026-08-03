@@ -234,16 +234,16 @@ pub fn content_to_message(content: &Content) -> Message {
                     },
                 });
             }
-            Part::FunctionResponse { function_response, id } => {
+            Part::FunctionResponse { function_response, id, .. } => {
                 // Tool response - set tool_call_id and content
                 tool_call_id = id.clone();
                 text_parts
                     .push(crate::tool_result::serialize_tool_result(&function_response.response));
             }
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 text_parts.push(attachment::inline_attachment_to_text(mime_type, data));
             }
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, .. } => {
                 text_parts.push(attachment::file_attachment_to_text(mime_type, file_uri));
             }
             Part::Thinking { thinking, .. } => {
@@ -449,10 +449,7 @@ mod tests {
     fn content_to_message_keeps_inline_attachment_payload() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::InlineData {
-                mime_type: "application/pdf".to_string(),
-                data: b"%PDF".to_vec(),
-            }],
+            parts: vec![Part::inline_data("application/pdf", b"%PDF".to_vec())],
         };
         let message = content_to_message(&content);
         let payload = message.content.unwrap_or_default();
@@ -464,10 +461,7 @@ mod tests {
     fn content_to_message_keeps_file_attachment_payload() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::FileData {
-                mime_type: "text/csv".to_string(),
-                file_uri: "https://example.com/data.csv".to_string(),
-            }],
+            parts: vec![Part::file_data("text/csv", "https://example.com/data.csv")],
         };
         let message = content_to_message(&content);
         let payload = message.content.unwrap_or_default();

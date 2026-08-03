@@ -499,6 +499,8 @@ impl GeminiModel {
                         converted_parts.push(Part::InlineData {
                             mime_type: inline_data.mime_type.clone(),
                             data: decoded,
+                            uri: None,
+                            annotations: None,
                         });
                     }
                     adk_gemini::Part::FunctionCall { function_call, thought_signature } => {
@@ -519,6 +521,7 @@ impl GeminiModel {
                                     .unwrap_or(serde_json::Value::Null),
                             ),
                             id: None,
+                            annotations: None,
                         });
                     }
                     adk_gemini::Part::ToolCall { .. } | adk_gemini::Part::ExecutableCode { .. } => {
@@ -536,6 +539,7 @@ impl GeminiModel {
                         converted_parts.push(Part::FileData {
                             mime_type: file_data.mime_type.clone(),
                             file_uri: file_data.file_uri.clone(),
+                            annotations: None,
                         });
                     }
                 }
@@ -682,7 +686,7 @@ impl GeminiModel {
                 // adapter's empty_schema fallback when none is provided.
                 let schema =
                     tool_decl.get("parameters").cloned().unwrap_or_else(|| adapter.empty_schema());
-                let normalized_schema = cache.get_or_normalize(&schema, adapter);
+                let normalized_schema = cache.normalize(&schema);
 
                 // Build the FunctionDeclaration with normalized values
                 let description =
@@ -696,7 +700,7 @@ impl GeminiModel {
 
                 // Preserve response schema if present (normalized like parameters)
                 if let Some(response) = tool_decl.get("response") {
-                    func_decl_json["response"] = cache.get_or_normalize(response, adapter);
+                    func_decl_json["response"] = cache.normalize(response);
                 }
 
                 // Preserve behavior if present
@@ -828,7 +832,7 @@ impl GeminiModel {
                                     thought_signature: signature.clone(),
                                 });
                             }
-                            Part::InlineData { data, mime_type } => {
+                            Part::InlineData { data, mime_type, .. } => {
                                 let encoded = attachment::encode_base64(data);
                                 gemini_parts.push(adk_gemini::Part::InlineData {
                                     inline_data: adk_gemini::Blob {
@@ -837,7 +841,7 @@ impl GeminiModel {
                                     },
                                 });
                             }
-                            Part::FileData { mime_type, file_uri } => {
+                            Part::FileData { mime_type, file_uri, .. } => {
                                 gemini_parts.push(adk_gemini::Part::Text {
                                     text: attachment::file_attachment_to_text(mime_type, file_uri),
                                     thought: None,
@@ -949,7 +953,7 @@ impl GeminiModel {
                     // recovered from the preceding FunctionCall (Gemini 3.x requirement)
                     let mut gemini_parts = Vec::new();
                     for part in &content.parts {
-                        if let Part::FunctionResponse { function_response, id } = part {
+                        if let Part::FunctionResponse { function_response, id, .. } = part {
                             let sig = fn_call_signatures.get(&function_response.name).cloned();
 
                             // Build nested FunctionResponsePart entries for multimodal data
@@ -1042,7 +1046,9 @@ impl GeminiModel {
         if !req.tools.is_empty() {
             let adapter = self.schema_adapter();
             use std::sync::LazyLock;
-            static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(SchemaCache::new);
+            static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(|| {
+                SchemaCache::for_adapter(std::sync::Arc::new(GeminiSchemaAdapter::new()))
+            });
             let (gemini_tools, tool_config) =
                 Self::build_gemini_tools(&req.tools, adapter, &SCHEMA_CACHE)?;
             for tool in gemini_tools {
@@ -1125,7 +1131,9 @@ impl GeminiModel {
 
         let adapter = self.schema_adapter();
         use std::sync::LazyLock;
-        static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(SchemaCache::new);
+        static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(|| {
+            SchemaCache::for_adapter(std::sync::Arc::new(GeminiSchemaAdapter::new()))
+        });
         let (gemini_tools, tool_config) = Self::build_gemini_tools(tools, adapter, &SCHEMA_CACHE)?;
         if !gemini_tools.is_empty() {
             cache_builder = cache_builder.with_tools(gemini_tools);
@@ -1481,7 +1489,7 @@ mod native_tool_tests {
     }
 
     fn test_cache() -> SchemaCache {
-        SchemaCache::new()
+        SchemaCache::for_adapter(std::sync::Arc::new(GeminiSchemaAdapter::new()))
     }
 
     #[test]
@@ -1928,7 +1936,7 @@ mod tests {
         assert!(content.parts.iter().any(|part| {
             matches!(
                 part,
-                Part::InlineData { mime_type, data }
+                Part::InlineData { mime_type, data, .. }
                     if mime_type == "image/png" && data.as_slice() == image_bytes.as_slice()
             )
         }));
@@ -2009,6 +2017,8 @@ mod tests {
             vec![adk_core::InlineDataPart {
                 mime_type: "image/png".to_string(),
                 data: vec![0x89, 0x50, 0x4E, 0x47],
+                uri: None,
+                annotations: None,
             }],
         );
         let gemini_fr = convert_function_response_to_gemini_fr(&frd);
@@ -2031,6 +2041,7 @@ mod tests {
             vec![adk_core::FileDataPart {
                 mime_type: "application/pdf".to_string(),
                 file_uri: "gs://bucket/report.pdf".to_string(),
+                annotations: None,
             }],
         );
         let gemini_fr = convert_function_response_to_gemini_fr(&frd);
@@ -2050,12 +2061,23 @@ mod tests {
             "multi",
             serde_json::json!({}),
             vec![
-                adk_core::InlineDataPart { mime_type: "image/png".to_string(), data: vec![1, 2] },
-                adk_core::InlineDataPart { mime_type: "image/jpeg".to_string(), data: vec![3, 4] },
+                adk_core::InlineDataPart {
+                    mime_type: "image/png".to_string(),
+                    data: vec![1, 2],
+                    uri: None,
+                    annotations: None,
+                },
+                adk_core::InlineDataPart {
+                    mime_type: "image/jpeg".to_string(),
+                    data: vec![3, 4],
+                    uri: None,
+                    annotations: None,
+                },
             ],
             vec![adk_core::FileDataPart {
                 mime_type: "application/pdf".to_string(),
                 file_uri: "gs://b/f.pdf".to_string(),
+                annotations: None,
             }],
         );
         let gemini_fr = convert_function_response_to_gemini_fr(&frd);

@@ -206,6 +206,12 @@ pub struct GeminiRealtimeSession {
     receiver: Arc<Mutex<WsSource>>,
     audio_buffer: Arc<ParkingMutex<BytesMut>>,
     event_queue: Arc<Mutex<std::collections::VecDeque<ServerEvent>>>,
+    /// The close frame the server sent, if it sent one.
+    ///
+    /// Recorded because the event stream reports a deliberate server-side
+    /// close and a dead socket as the same `None`, so a polling caller cannot
+    /// tell an aborted session from a broken one without it.
+    last_disconnect: Arc<ParkingMutex<Option<crate::session::DisconnectReason>>>,
 }
 
 impl GeminiRealtimeSession {
@@ -327,6 +333,7 @@ impl GeminiRealtimeSession {
             writer_task: Arc::new(Mutex::new(Some(writer_task))),
             receiver: Arc::new(Mutex::new(source)),
             audio_buffer: Arc::new(ParkingMutex::new(BytesMut::new())),
+            last_disconnect: Arc::new(ParkingMutex::new(None)),
             event_queue: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         };
 
@@ -484,7 +491,26 @@ impl GeminiRealtimeSession {
                 )))),
             },
             Some(Ok(Message::Close(close_frame))) => {
-                tracing::error!("WebSocket closed by server: {:?}", close_frame);
+                // Structured, because a server-initiated close and a dead
+                // transport both surface downstream as the same `None` and get
+                // the same terminal reason. The code and reason are the only
+                // thing distinguishing "the provider aborted an idle session"
+                // from "the network dropped", and `{:?}` on the whole frame
+                // buries both inside a Debug string nothing can filter on.
+                tracing::error!(
+                    close_code =
+                        close_frame.as_ref().map(|frame| u16::from(frame.code)).unwrap_or_default(),
+                    close_reason =
+                        close_frame.as_ref().map(|frame| frame.reason.as_ref()).unwrap_or(""),
+                    "WebSocket closed by server"
+                );
+                *self.last_disconnect.lock() = Some(crate::session::DisconnectReason {
+                    code: close_frame.as_ref().map(|frame| u16::from(frame.code)),
+                    reason: close_frame
+                        .as_ref()
+                        .map(|frame| frame.reason.to_string())
+                        .unwrap_or_default(),
+                });
                 self.connected.store(false, Ordering::SeqCst);
                 None
             }
@@ -656,6 +682,10 @@ impl RealtimeSession for GeminiRealtimeSession {
 
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::SeqCst)
+    }
+
+    fn disconnect_reason(&self) -> Option<crate::session::DisconnectReason> {
+        self.last_disconnect.lock().clone()
     }
 
     async fn send_audio(&self, audio: &AudioChunk) -> Result<()> {
@@ -917,7 +947,7 @@ pub(crate) fn translate_client_message(
             adk_core::types::Part::Text { text } => {
                 gemini_parts.push(GeminiPart { text: Some(text), inline_data: None });
             }
-            adk_core::types::Part::InlineData { mime_type, data } => {
+            adk_core::types::Part::InlineData { mime_type, data, .. } => {
                 // Gemini natively encodes binary artifacts (images/audio) via a base64 payload envelope.
                 let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
                 gemini_parts.push(GeminiPart {
@@ -1053,7 +1083,7 @@ mod tests {
     fn test_gemini_translate_text_and_inline_data() {
         let parts = vec![
             Part::Text { text: "Look:".to_string() },
-            Part::InlineData { mime_type: "image/png".to_string(), data: vec![0x1, 0x2] },
+            Part::inline_data("image/png", vec![0x1, 0x2]),
         ];
         let msg = translate_client_message("user", parts);
 
@@ -1087,7 +1117,7 @@ mod tests {
     #[test]
     fn test_gemini_system_override_non_text_first() {
         let parts = vec![
-            Part::InlineData { mime_type: "image/png".to_string(), data: vec![0x1] },
+            Part::inline_data("image/png", vec![0x1]),
             Part::Text { text: "Analyze this".to_string() },
         ];
         let msg = translate_client_message("system", parts);
@@ -1106,7 +1136,7 @@ mod tests {
 
     #[test]
     fn test_gemini_system_override_no_text() {
-        let parts = vec![Part::InlineData { mime_type: "image/png".to_string(), data: vec![0x1] }];
+        let parts = vec![Part::inline_data("image/png", vec![0x1])];
         let msg = translate_client_message("system", parts);
 
         let content = msg.client_content.unwrap();
@@ -1125,6 +1155,7 @@ mod tests {
             Part::FileData {
                 mime_type: "image/jpeg".to_string(),
                 file_uri: "http://example.com/img".to_string(),
+                annotations: None,
             }, // Should be skipped
             Part::Thinking { thinking: "Hmm".to_string(), signature: None }, // Should be skipped
             Part::Text { text: "Last".to_string() },

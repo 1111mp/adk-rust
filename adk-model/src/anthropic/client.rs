@@ -191,7 +191,8 @@ impl AnthropicClient {
             } else {
                 use std::sync::LazyLock;
                 static ADAPTER: AnthropicSchemaAdapter = AnthropicSchemaAdapter;
-                static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(SchemaCache::new);
+                static SCHEMA_CACHE: LazyLock<SchemaCache> =
+                    LazyLock::new(|| SchemaCache::for_adapter(Arc::new(AnthropicSchemaAdapter)));
                 convert::convert_tools(&filtered_tools, &ADAPTER, &SCHEMA_CACHE)?
             }
         };
@@ -1008,6 +1009,7 @@ mod tests {
                         serde_json::json!({"result": "ok"}),
                     ),
                     id: Some("call_1".to_string()),
+                    annotations: None,
                 }],
             },
             Content {

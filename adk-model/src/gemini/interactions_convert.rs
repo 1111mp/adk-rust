@@ -202,9 +202,18 @@ fn media_part(
     let mime = mime_type.unwrap_or(default_mime).to_string();
     if let Some(encoded) = data {
         let bytes = BASE64_STANDARD.decode(encoded).ok()?;
-        Some(Part::InlineData { mime_type: mime, data: bytes })
+        Some(Part::InlineData {
+            mime_type: mime,
+            data: bytes,
+            uri: uri.map(str::to_string),
+            annotations: None,
+        })
     } else {
-        uri.map(|file_uri| Part::FileData { mime_type: mime, file_uri: file_uri.to_string() })
+        uri.map(|file_uri| Part::FileData {
+            mime_type: mime,
+            file_uri: file_uri.to_string(),
+            annotations: None,
+        })
     }
 }
 
@@ -446,7 +455,7 @@ fn append_steps(content: &Content, steps: &mut Vec<Step>) {
         }
         "function" => {
             for part in &content.parts {
-                if let Part::FunctionResponse { function_response, id } = part {
+                if let Part::FunctionResponse { function_response, id, .. } = part {
                     steps.push(Step::FunctionResult {
                         call_id: id.clone().unwrap_or_default(),
                         name: Some(function_response.name.clone()),
@@ -476,11 +485,11 @@ fn content_parts(content: &Content) -> Vec<IxContent> {
 fn part_to_content(part: &Part) -> Option<IxContent> {
     match part {
         Part::Text { text } => Some(IxContent::text(text.clone())),
-        Part::InlineData { mime_type, data } => {
+        Part::InlineData { mime_type, data, .. } => {
             let encoded = crate::attachment::encode_base64(data);
             Some(inline_content(mime_type, encoded))
         }
-        Part::FileData { mime_type, file_uri } => Some(uri_content(mime_type, file_uri)),
+        Part::FileData { mime_type, file_uri, .. } => Some(uri_content(mime_type, file_uri)),
         _ => None,
     }
 }
@@ -1097,6 +1106,7 @@ mod tests {
                         serde_json::json!({"temp": 72}),
                     ),
                     id: Some("call-1".to_string()),
+                    annotations: None,
                 }],
             },
         ]);
@@ -1532,7 +1542,7 @@ mod tests {
         let response = to_llm_response(&interaction);
         let content = response.content.expect("should carry content");
         match &content.parts[0] {
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 assert_eq!(mime_type, "image/png");
                 assert_eq!(data, &bytes);
             }
@@ -1558,7 +1568,7 @@ mod tests {
         let response = to_llm_response(&interaction);
         let content = response.content.expect("should carry content");
         match &content.parts[0] {
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, .. } => {
                 assert_eq!(mime_type, "image/jpeg");
                 assert_eq!(file_uri, "https://example.com/cat.jpg");
             }
@@ -2045,6 +2055,7 @@ mod tests {
                         serde_json::json!({ "temp": 72, "conditions": "sunny" }),
                     ),
                     id: Some(call_id.clone()),
+                    annotations: None,
                 }],
             },
         ]);

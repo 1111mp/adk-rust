@@ -24,7 +24,7 @@ use adk_plugin::{
 use crate::skill_shim::load_skill_index;
 use crate::{
     guardrails::{GuardrailSet, enforce_guardrails},
-    skill_shim::{SelectionPolicy, SkillIndex, select_skill_prompt_block},
+    skill_shim::{SelectionPolicy, SkillIndex, apply_skill_injection},
     tool_call_markup::normalize_option_content,
     workflow::with_user_content_override,
 };
@@ -286,28 +286,6 @@ impl PromptConfig {
     ) -> Result<Vec<Content>> {
         let mut preamble = Vec::new();
 
-        if let Some(index) = &self.skills_index {
-            let user_query = ctx
-                .user_content()
-                .parts
-                .iter()
-                .filter_map(|part| match part {
-                    Part::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            if let Some((_matched, skill_block)) = select_skill_prompt_block(
-                index.as_ref(),
-                &user_query,
-                &self.skill_policy,
-                self.max_skill_chars,
-            ) {
-                preamble.push(Content::new("user").with_text(skill_block));
-            }
-        }
-
         if let Some(provider) = &self.global_instruction_provider {
             let instruction = provider(ctx.clone() as Arc<dyn ReadonlyContext>).await?;
             if !instruction.is_empty() {
@@ -342,7 +320,15 @@ impl PromptConfig {
             if ctx.run_config().transfer_targets.is_empty() { None } else { Some(agent_name) };
         let mut session_history =
             ctx.session().conversation_history_scoped(agent_filter, ctx.branch());
-        let current_user_content = ctx.user_content().clone();
+        let mut current_user_content = ctx.user_content().clone();
+        if let Some(index) = &self.skills_index {
+            apply_skill_injection(
+                &mut current_user_content,
+                index.as_ref(),
+                &self.skill_policy,
+                self.max_skill_chars,
+            );
+        }
         if let Some(index) = session_history.iter().rposition(|content| content.role == "user") {
             session_history[index] = current_user_content.clone();
         } else {
@@ -784,6 +770,9 @@ impl LlmAgentBuilder {
     }
 
     /// Set a preloaded skills index for this agent.
+    ///
+    /// The best matching skill is injected into the current user turn so stable
+    /// instructions and conversation history remain available for prompt caching.
     #[cfg(feature = "skills")]
     pub fn with_skills(mut self, index: SkillIndex) -> Self {
         self.skills_index = Some(Arc::new(index));
@@ -1735,6 +1724,7 @@ impl ToolExecutor<'_> {
                             serde_json::json!({ "error": e.to_string() }),
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 };
                 return ToolExecutionResult {
@@ -1773,6 +1763,7 @@ impl ToolExecutor<'_> {
                                 }),
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     run_after_tool_callbacks = false;
@@ -1788,6 +1779,7 @@ impl ToolExecutor<'_> {
                                 }),
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     run_after_tool_callbacks = false;
@@ -1827,6 +1819,7 @@ impl ToolExecutor<'_> {
                                 synthetic_result,
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     executed_tool = Some(tool_ref.clone());
@@ -1840,6 +1833,7 @@ impl ToolExecutor<'_> {
                                 serde_json::json!({ "error": e.to_string() }),
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     run_after_tool_callbacks = false;
@@ -1869,6 +1863,7 @@ impl ToolExecutor<'_> {
                                     serde_json::json!({ "error": e.to_string() }),
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         });
                         run_after_tool_callbacks = false;
@@ -1897,6 +1892,7 @@ impl ToolExecutor<'_> {
                             serde_json::json!({ "error": msg }),
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 });
                 run_after_tool_callbacks = false;
@@ -2066,6 +2062,7 @@ impl ToolExecutor<'_> {
                             final_function_response,
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 });
             } else {
@@ -2079,6 +2076,7 @@ impl ToolExecutor<'_> {
                             }),
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 });
             }
@@ -2112,6 +2110,7 @@ impl ToolExecutor<'_> {
                                     serde_json::json!({ "error": e.to_string() }),
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         };
                         break;
@@ -2137,6 +2136,7 @@ impl ToolExecutor<'_> {
                                         modified_value,
                                     ),
                                     id: id.clone(),
+                                    annotations: None,
                                 }],
                             };
                             break;
@@ -2151,6 +2151,7 @@ impl ToolExecutor<'_> {
                                         serde_json::json!({ "error": e.to_string() }),
                                     ),
                                     id: id.clone(),
+                                    annotations: None,
                                 }],
                             };
                             break;
@@ -2196,6 +2197,7 @@ impl ToolExecutor<'_> {
                                     modified_result,
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         };
                     }
@@ -2208,6 +2210,7 @@ impl ToolExecutor<'_> {
                                     serde_json::json!({ "error": e.to_string() }),
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         };
                     }
@@ -2909,6 +2912,7 @@ impl Agent for LlmAgent {
                                             }),
                                         ),
                                         id: call.id.clone(),
+                                        annotations: None,
                                     }],
                                 };
                                 conversation_history.push(error_content.clone());

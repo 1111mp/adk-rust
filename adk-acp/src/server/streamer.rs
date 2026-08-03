@@ -64,7 +64,7 @@ impl ResponseStreamer {
                             .raw_input(args.clone()),
                     ));
                 }
-                Part::FunctionResponse { function_response, id } => {
+                Part::FunctionResponse { function_response, id, .. } => {
                     let call_id =
                         id.clone().unwrap_or_else(|| format!("{}-call", function_response.name));
                     let mut fields = ToolCallUpdateFields::new()
@@ -122,15 +122,22 @@ fn tool_result_content(response: &FunctionResponseData) -> Vec<ToolCallContent> 
         }
     }
     for inline in &response.inline_data {
-        let part =
-            Part::InlineData { mime_type: inline.mime_type.clone(), data: inline.data.clone() };
+        let part = Part::InlineData {
+            mime_type: inline.mime_type.clone(),
+            data: inline.data.clone(),
+            uri: inline.uri.clone(),
+            annotations: inline.annotations.clone(),
+        };
         if let Some(block) = crate::content::part_to_block(&part) {
             content.push(ToolCallContent::from(block));
         }
     }
     for file in &response.file_data {
-        let part =
-            Part::FileData { mime_type: file.mime_type.clone(), file_uri: file.file_uri.clone() };
+        let part = Part::FileData {
+            mime_type: file.mime_type.clone(),
+            file_uri: file.file_uri.clone(),
+            annotations: file.annotations.clone(),
+        };
         if let Some(block) = crate::content::part_to_block(&part) {
             content.push(ToolCallContent::from(block));
         }
@@ -285,27 +292,37 @@ mod tests {
 
     #[test]
     fn replays_inline_image_and_audio_with_exact_wire_payloads() {
-        use agent_client_protocol::schema::v1::{AudioContent, ImageContent};
+        use agent_client_protocol::schema::v1::{Annotations, AudioContent, ImageContent};
+
+        let annotations = Annotations::new().priority(Some(0.8));
+        let annotation_value = serde_json::to_value(&annotations).unwrap();
 
         let mut event = Event::new("inv-media");
         let mut content = Content::new("user");
         content.parts.push(Part::InlineData {
             mime_type: "image/png".into(),
             data: vec![0x89, 0x50, 0x4e, 0x47],
+            uri: Some("file:///screenshots/result.png".into()),
+            annotations: Some(annotation_value.clone()),
         });
-        content
-            .parts
-            .push(Part::InlineData { mime_type: "audio/mpeg".into(), data: vec![1, 2, 3, 4, 5] });
+        content.parts.push(Part::InlineData {
+            mime_type: "audio/mpeg".into(),
+            data: vec![1, 2, 3, 4, 5],
+            uri: None,
+            annotations: Some(annotation_value),
+        });
         event.set_content(content);
 
         assert_eq!(
             ResponseStreamer::map_event(&event),
             vec![
                 SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Image(
-                    ImageContent::new("iVBORw==", "image/png"),
+                    ImageContent::new("iVBORw==", "image/png")
+                        .uri(Some("file:///screenshots/result.png".into()))
+                        .annotations(Some(annotations.clone())),
                 ))),
                 SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Audio(
-                    AudioContent::new("AQIDBAU=", "audio/mpeg"),
+                    AudioContent::new("AQIDBAU=", "audio/mpeg").annotations(Some(annotations)),
                 ))),
             ],
         );
@@ -351,6 +368,7 @@ mod tests {
                 serde_json::json!({"content":"fn main() {}"}),
             ),
             id: Some("call-1".into()),
+            annotations: None,
         });
         event.set_content(content);
 
@@ -371,13 +389,17 @@ mod tests {
                 vec![InlineDataPart {
                     mime_type: "image/png".into(),
                     data: vec![0x89, 0x50, 0x4e, 0x47],
+                    uri: None,
+                    annotations: None,
                 }],
                 vec![FileDataPart {
                     mime_type: "application/pdf".into(),
                     file_uri: "https://example.com/reports/result.pdf".into(),
+                    annotations: None,
                 }],
             ),
             id: Some("call-media".into()),
+            annotations: None,
         });
         event.set_content(content);
 
@@ -498,6 +520,7 @@ mod tests {
                 serde_json::json!({"path":"src/lib.rs","content":"fn main() {}"}),
             ),
             id: Some(call_id.into()),
+            annotations: None,
         });
         result_event.set_content(result_content);
 
@@ -523,6 +546,7 @@ mod tests {
                 serde_json::json!({"path":"src/main.rs","content":"fn main() {}"}),
             ),
             id: Some("call-1".into()),
+            annotations: None,
         });
         event.set_content(content);
 
@@ -548,6 +572,7 @@ mod tests {
                 serde_json::json!({"paths":["a.rs","b.rs"]}),
             ),
             id: Some("call-2".into()),
+            annotations: None,
         });
         event.set_content(content);
 

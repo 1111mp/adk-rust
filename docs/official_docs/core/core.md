@@ -65,16 +65,29 @@ pub enum Part {
     Text { text: String },
     
     // Binary data embedded in the message
-    InlineData { mime_type: String, data: Vec<u8> },
+    InlineData {
+        mime_type: String,
+        data: Vec<u8>,
+        uri: Option<String>,
+        annotations: Option<Value>,
+    },
     
     // Reference to external file (URL or cloud storage)
-    FileData { mime_type: String, file_uri: String },
+    FileData {
+        mime_type: String,
+        file_uri: String,
+        annotations: Option<Value>,
+    },
     
     // Model requesting a tool call
     FunctionCall { name: String, args: Value, id: Option<String> },
     
     // Result of a tool execution
-    FunctionResponse { function_response: FunctionResponseData, id: Option<String> },
+    FunctionResponse {
+        function_response: FunctionResponseData,
+        id: Option<String>,
+        annotations: Option<Value>,
+    },
     
     // A complete resource embedded in the message (source URI + inline contents)
     EmbeddedResource { resource: EmbeddedResource },

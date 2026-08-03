@@ -64,10 +64,13 @@ async fn main() -> anyhow::Result<()> {
                 Part::InlineData {
                     mime_type: "image/png".to_string(),
                     data: vec![0x89, 0x50, 0x4E, 0x47],
+                    uri: None,
+                    annotations: None,
                 },
                 Part::FileData {
                     mime_type: "image/jpeg".to_string(),
                     file_uri: "https://example.com/photo.jpg".to_string(),
+                    annotations: None,
                 },
             ],
         }],

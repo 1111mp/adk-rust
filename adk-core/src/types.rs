@@ -17,6 +17,8 @@ pub const MAX_INLINE_DATA_SIZE: usize = 10 * 1024 * 1024;
 /// let part = InlineDataPart {
 ///     mime_type: "image/png".to_string(),
 ///     data: vec![0x89, 0x50, 0x4E, 0x47],
+///     uri: None,
+///     annotations: None,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,6 +27,12 @@ pub struct InlineDataPart {
     pub mime_type: String,
     /// Raw binary data.
     pub data: Vec<u8>,
+    /// Optional source URI associated with the inline payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    /// Optional protocol or presentation annotations preserved with the payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<serde_json::Value>,
 }
 
 /// Data part for file references in a function response.
@@ -39,6 +47,7 @@ pub struct InlineDataPart {
 /// let part = FileDataPart {
 ///     mime_type: "application/pdf".to_string(),
 ///     file_uri: "gs://my-bucket/report.pdf".to_string(),
+///     annotations: None,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,6 +56,9 @@ pub struct FileDataPart {
     pub mime_type: String,
     /// URI to the file (URL, gs://, etc.).
     pub file_uri: String,
+    /// Optional protocol or presentation annotations preserved with the reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<serde_json::Value>,
 }
 
 /// Text contents of an embedded resource.
@@ -357,6 +369,12 @@ pub enum Part {
         mime_type: String,
         /// Raw binary data.
         data: Vec<u8>,
+        /// Optional source URI associated with the inline payload.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+        /// Optional protocol or presentation annotations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        annotations: Option<serde_json::Value>,
     },
     /// File data referenced by URI (URL or cloud storage path).
     ///
@@ -371,6 +389,7 @@ pub enum Part {
     /// let image_url = Part::FileData {
     ///     mime_type: "image/jpeg".to_string(),
     ///     file_uri: "https://example.com/image.jpg".to_string(),
+    ///     annotations: None,
     /// };
     /// ```
     FileData {
@@ -378,6 +397,9 @@ pub enum Part {
         mime_type: String,
         /// URI to the file (URL, gs://, etc.)
         file_uri: String,
+        /// Optional protocol or presentation annotations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        annotations: Option<serde_json::Value>,
     },
     /// A function (tool) call from the model.
     FunctionCall {
@@ -402,6 +424,9 @@ pub enum Part {
         /// Tool call ID for OpenAI-style providers. None for Gemini.
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
+        /// Optional protocol or presentation annotations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        annotations: Option<serde_json::Value>,
     },
     /// Server-side tool call data from Gemini 3 built-in tool invocations.
     /// Stored as opaque JSON to avoid coupling core types to provider-specific schemas.
@@ -492,7 +517,12 @@ impl Content {
             data.len(),
             MAX_INLINE_DATA_SIZE
         );
-        self.parts.push(Part::InlineData { mime_type: mime_type.into(), data });
+        self.parts.push(Part::InlineData {
+            mime_type: mime_type.into(),
+            data,
+            uri: None,
+            annotations: None,
+        });
         self
     }
 
@@ -508,7 +538,11 @@ impl Content {
         mime_type: impl Into<String>,
         file_uri: impl Into<String>,
     ) -> Self {
-        self.parts.push(Part::FileData { mime_type: mime_type.into(), file_uri: file_uri.into() });
+        self.parts.push(Part::FileData {
+            mime_type: mime_type.into(),
+            file_uri: file_uri.into(),
+            annotations: None,
+        });
         self
     }
 
@@ -570,6 +604,25 @@ impl Part {
         }
     }
 
+    /// Returns the source URI for inline or referenced file data.
+    pub fn uri(&self) -> Option<&str> {
+        match self {
+            Part::InlineData { uri, .. } => uri.as_deref(),
+            Part::FileData { file_uri, .. } => Some(file_uri.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Returns protocol or presentation annotations attached to this part.
+    pub fn annotations(&self) -> Option<&serde_json::Value> {
+        match self {
+            Part::InlineData { annotations, .. }
+            | Part::FileData { annotations, .. }
+            | Part::FunctionResponse { annotations, .. } => annotations.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Returns true if this part contains media (image, audio, video)
     pub fn is_media(&self) -> bool {
         matches!(self, Part::InlineData { .. } | Part::FileData { .. })
@@ -599,12 +652,12 @@ impl Part {
             data.len(),
             MAX_INLINE_DATA_SIZE
         );
-        Part::InlineData { mime_type: mime_type.into(), data }
+        Part::InlineData { mime_type: mime_type.into(), data, uri: None, annotations: None }
     }
 
     /// Create a new file data part from URI
     pub fn file_data(mime_type: impl Into<String>, file_uri: impl Into<String>) -> Self {
-        Part::FileData { mime_type: mime_type.into(), file_uri: file_uri.into() }
+        Part::FileData { mime_type: mime_type.into(), file_uri: file_uri.into(), annotations: None }
     }
 }
 
@@ -653,6 +706,7 @@ mod tests {
         let part = Part::FileData {
             mime_type: "image/jpeg".to_string(),
             file_uri: "https://example.com/image.jpg".to_string(),
+            annotations: None,
         };
         let json = serde_json::to_string(&part).unwrap();
         assert!(json.contains("image/jpeg"));
@@ -664,7 +718,7 @@ mod tests {
         let text_part = Part::Text { text: "hello".to_string() };
         assert_eq!(text_part.text(), Some("hello"));
 
-        let data_part = Part::InlineData { mime_type: "image/png".to_string(), data: vec![] };
+        let data_part = Part::inline_data("image/png", vec![]);
         assert_eq!(data_part.text(), None);
     }
 
@@ -673,12 +727,13 @@ mod tests {
         let text_part = Part::Text { text: "hello".to_string() };
         assert_eq!(text_part.mime_type(), None);
 
-        let inline_part = Part::InlineData { mime_type: "image/png".to_string(), data: vec![] };
+        let inline_part = Part::inline_data("image/png", vec![]);
         assert_eq!(inline_part.mime_type(), Some("image/png"));
 
         let file_part = Part::FileData {
             mime_type: "image/jpeg".to_string(),
             file_uri: "https://example.com".to_string(),
+            annotations: None,
         };
         assert_eq!(file_part.mime_type(), Some("image/jpeg"));
     }
@@ -691,6 +746,7 @@ mod tests {
         let file_part = Part::FileData {
             mime_type: "image/jpeg".to_string(),
             file_uri: "https://example.com/img.jpg".to_string(),
+            annotations: None,
         };
         assert_eq!(file_part.file_uri(), Some("https://example.com/img.jpg"));
     }
@@ -700,12 +756,13 @@ mod tests {
         let text_part = Part::Text { text: "hello".to_string() };
         assert!(!text_part.is_media());
 
-        let inline_part = Part::InlineData { mime_type: "image/png".to_string(), data: vec![] };
+        let inline_part = Part::inline_data("image/png", vec![]);
         assert!(inline_part.is_media());
 
         let file_part = Part::FileData {
             mime_type: "image/jpeg".to_string(),
             file_uri: "https://example.com".to_string(),
+            annotations: None,
         };
         assert!(file_part.is_media());
     }
@@ -717,12 +774,12 @@ mod tests {
 
         let inline = Part::inline_data("image/png", vec![1, 2, 3]);
         assert!(
-            matches!(inline, Part::InlineData { mime_type, data } if mime_type == "image/png" && data == vec![1, 2, 3])
+            matches!(inline, Part::InlineData { mime_type, data, .. } if mime_type == "image/png" && data == vec![1, 2, 3])
         );
 
         let file = Part::file_data("image/jpeg", "https://example.com/img.jpg");
         assert!(
-            matches!(file, Part::FileData { mime_type, file_uri } if mime_type == "image/jpeg" && file_uri == "https://example.com/img.jpg")
+            matches!(file, Part::FileData { mime_type, file_uri, .. } if mime_type == "image/jpeg" && file_uri == "https://example.com/img.jpg")
         );
     }
 
@@ -773,7 +830,7 @@ mod tests {
         assert!(!text.is_thinking());
         assert_eq!(text.thinking_text(), None);
 
-        let data = Part::InlineData { mime_type: "image/png".to_string(), data: vec![] };
+        let data = Part::inline_data("image/png", vec![]);
         assert!(!data.is_thinking());
         assert_eq!(data.thinking_text(), None);
     }
@@ -873,7 +930,12 @@ mod tests {
 
     #[test]
     fn test_inline_data_part_serde_round_trip() {
-        let part = InlineDataPart { mime_type: "image/png".to_string(), data: vec![1, 2, 3, 4] };
+        let part = InlineDataPart {
+            mime_type: "image/png".to_string(),
+            data: vec![1, 2, 3, 4],
+            uri: Some("file:///screenshots/result.png".to_string()),
+            annotations: Some(serde_json::json!({"audience": ["user"], "priority": 0.8})),
+        };
         let json = serde_json::to_string(&part).unwrap();
         let deserialized: InlineDataPart = serde_json::from_str(&json).unwrap();
         assert_eq!(part, deserialized);
@@ -884,10 +946,64 @@ mod tests {
         let part = FileDataPart {
             mime_type: "application/pdf".to_string(),
             file_uri: "gs://bucket/report.pdf".to_string(),
+            annotations: Some(serde_json::json!({"audience": ["assistant"]})),
         };
         let json = serde_json::to_string(&part).unwrap();
         let deserialized: FileDataPart = serde_json::from_str(&json).unwrap();
         assert_eq!(part, deserialized);
+    }
+
+    #[test]
+    fn part_metadata_survives_session_serialization() {
+        let annotations = serde_json::json!({"audience": ["user"], "priority": 0.8});
+        let parts = vec![
+            Part::InlineData {
+                mime_type: "image/png".to_string(),
+                data: vec![1, 2, 3],
+                uri: Some("file:///screenshots/result.png".to_string()),
+                annotations: Some(annotations.clone()),
+            },
+            Part::FileData {
+                mime_type: "application/pdf".to_string(),
+                file_uri: "file:///reports/result.pdf".to_string(),
+                annotations: Some(annotations.clone()),
+            },
+            Part::FunctionResponse {
+                function_response: FunctionResponseData::new(
+                    "render_report",
+                    serde_json::json!({"ok": true}),
+                ),
+                id: Some("call-1".to_string()),
+                annotations: Some(annotations.clone()),
+            },
+        ];
+
+        let encoded = serde_json::to_value(&parts).unwrap();
+        let decoded: Vec<Part> = serde_json::from_value(encoded).unwrap();
+
+        assert_eq!(decoded, parts);
+        assert_eq!(decoded[0].uri(), Some("file:///screenshots/result.png"));
+        assert_eq!(decoded[0].annotations(), Some(&annotations));
+        assert_eq!(decoded[1].annotations(), Some(&annotations));
+        assert_eq!(decoded[2].annotations(), Some(&annotations));
+    }
+
+    #[test]
+    fn part_metadata_fields_default_when_deserializing_existing_payloads() {
+        let inline: Part = serde_json::from_value(serde_json::json!({
+            "mime_type": "image/png",
+            "data": [1, 2, 3]
+        }))
+        .unwrap();
+        assert_eq!(inline.uri(), None);
+        assert_eq!(inline.annotations(), None);
+
+        let file: Part = serde_json::from_value(serde_json::json!({
+            "mime_type": "application/pdf",
+            "file_uri": "file:///reports/result.pdf"
+        }))
+        .unwrap();
+        assert_eq!(file.annotations(), None);
     }
 
     #[test]
@@ -901,8 +1017,12 @@ mod tests {
 
     #[test]
     fn test_function_response_data_with_inline_data() {
-        let inline =
-            vec![InlineDataPart { mime_type: "image/png".to_string(), data: vec![0x89, 0x50] }];
+        let inline = vec![InlineDataPart {
+            mime_type: "image/png".to_string(),
+            data: vec![0x89, 0x50],
+            uri: None,
+            annotations: None,
+        }];
         let frd = FunctionResponseData::with_inline_data(
             "chart_tool",
             serde_json::json!({"ok": true}),
@@ -917,6 +1037,7 @@ mod tests {
         let files = vec![FileDataPart {
             mime_type: "application/pdf".to_string(),
             file_uri: "gs://bucket/doc.pdf".to_string(),
+            annotations: None,
         }];
         let frd = FunctionResponseData::with_file_data(
             "doc_tool",
@@ -929,11 +1050,16 @@ mod tests {
 
     #[test]
     fn test_function_response_data_with_multimodal() {
-        let inline =
-            vec![InlineDataPart { mime_type: "image/png".to_string(), data: vec![1, 2, 3] }];
+        let inline = vec![InlineDataPart {
+            mime_type: "image/png".to_string(),
+            data: vec![1, 2, 3],
+            uri: None,
+            annotations: None,
+        }];
         let files = vec![FileDataPart {
             mime_type: "audio/wav".to_string(),
             file_uri: "https://example.com/audio.wav".to_string(),
+            annotations: None,
         }];
         let frd = FunctionResponseData::with_multimodal(
             "multi_tool",
@@ -963,10 +1089,16 @@ mod tests {
         let frd = FunctionResponseData::with_multimodal(
             "tool",
             serde_json::json!({"status": "ok"}),
-            vec![InlineDataPart { mime_type: "image/png".to_string(), data: vec![1, 2] }],
+            vec![InlineDataPart {
+                mime_type: "image/png".to_string(),
+                data: vec![1, 2],
+                uri: None,
+                annotations: None,
+            }],
             vec![FileDataPart {
                 mime_type: "application/pdf".to_string(),
                 file_uri: "gs://b/f.pdf".to_string(),
+                annotations: None,
             }],
         );
         let json = serde_json::to_string(&frd).unwrap();
@@ -980,6 +1112,8 @@ mod tests {
         let oversized = vec![InlineDataPart {
             mime_type: "image/png".to_string(),
             data: vec![0u8; MAX_INLINE_DATA_SIZE + 1],
+            uri: None,
+            annotations: None,
         }];
         let _ = FunctionResponseData::with_inline_data("tool", serde_json::json!({}), oversized);
     }
@@ -990,6 +1124,8 @@ mod tests {
         let oversized = vec![InlineDataPart {
             mime_type: "image/png".to_string(),
             data: vec![0u8; MAX_INLINE_DATA_SIZE + 1],
+            uri: None,
+            annotations: None,
         }];
         let _ =
             FunctionResponseData::with_multimodal("tool", serde_json::json!({}), oversized, vec![]);

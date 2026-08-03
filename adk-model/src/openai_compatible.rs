@@ -3,8 +3,8 @@
 use crate::openai::convert;
 use crate::retry::{RetryConfig, execute_with_retry, is_retryable_model_error};
 use adk_core::{
-    AdkError, Content, ErrorCategory, ErrorComponent, FinishReason, Llm, LlmRequest, LlmResponse,
-    LlmResponseStream, Part, SchemaAdapter, SchemaCache, UsageMetadata,
+    AdkError, Content, ErrorCategory, ErrorComponent, FinishReason, GenericSchemaAdapter, Llm,
+    LlmRequest, LlmResponse, LlmResponseStream, Part, SchemaAdapter, SchemaCache, UsageMetadata,
 };
 use async_openai::types::chat::{
     CreateChatCompletionRequestArgs, ReasoningEffort, ResponseFormat, ResponseFormatJsonSchema,
@@ -486,7 +486,8 @@ impl Llm for OpenAICompatible {
         // Normalize tool schemas at request time using the schema adapter.
         let adapter = self.schema_adapter();
         use std::sync::LazyLock;
-        static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(SchemaCache::new);
+        static SCHEMA_CACHE: LazyLock<SchemaCache> =
+            LazyLock::new(|| SchemaCache::for_adapter(std::sync::Arc::new(GenericSchemaAdapter)));
         let request_body = build_request_json(
             &model,
             &request,

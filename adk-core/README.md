@@ -114,10 +114,10 @@ let content = Content::new("user")
 // Part variants
 enum Part {
     Text { text: String },
-    InlineData { mime_type: String, data: Vec<u8> },  // Max 10MB (MAX_INLINE_DATA_SIZE)
-    FileData { mime_type: String, file_uri: String },
+    InlineData { mime_type: String, data: Vec<u8>, uri: Option<String>, annotations: Option<Value> },
+    FileData { mime_type: String, file_uri: String, annotations: Option<Value> },
     FunctionCall { name: String, args: Value, id: Option<String> },
-    FunctionResponse { function_response: FunctionResponseData, id: Option<String> },
+    FunctionResponse { function_response: FunctionResponseData, id: Option<String>, annotations: Option<Value> },
 }
 ```
 
@@ -136,14 +136,23 @@ Ok(json!({
 let frd = FunctionResponseData::with_inline_data(
     "chart_tool",
     json!({"title": "Q4 Chart"}),
-    vec![InlineDataPart { mime_type: "image/png".into(), data: png_bytes }],
+    vec![InlineDataPart {
+        mime_type: "image/png".into(),
+        data: png_bytes,
+        uri: None,
+        annotations: None,
+    }],
 );
 
 // File references (URIs to external files)
 let frd = FunctionResponseData::with_file_data(
     "doc_tool",
     json!({"status": "ok"}),
-    vec![FileDataPart { mime_type: "application/pdf".into(), file_uri: "gs://bucket/report.pdf".into() }],
+    vec![FileDataPart {
+        mime_type: "application/pdf".into(),
+        file_uri: "gs://bucket/report.pdf".into(),
+        annotations: None,
+    }],
 );
 ```
 
