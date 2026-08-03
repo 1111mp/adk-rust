@@ -38,6 +38,7 @@ libc = "0.2"
 
 # Optional: Windows AppContainer API
 [target.'cfg(windows)'.dependencies]
+find-msvc-tools = "0.1.9"
 windows-sys = { version = "0.59", optional = true, features = [
     "Win32_Security",
     "Win32_System_Threading",
