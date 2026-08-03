@@ -20,7 +20,7 @@ use rmcp::{
         GetPromptResult, GetTaskParams, GetTaskPayloadParams, GetTaskPayloadRequest,
         GetTaskRequest, Prompt, ReadResourceRequestParams, Resource, ResourceContents,
         ResourceTemplate, ServerResult, SubscribeRequestParams, TaskMetadata, TaskSupport,
-        UnsubscribeRequestParams,
+        ToolAnnotations, UnsubscribeRequestParams,
     },
     service::RunningService,
 };
@@ -32,6 +32,12 @@ use tracing::{debug, warn};
 
 /// Shared factory object used to recreate MCP connections for refresh/retry.
 type DynConnectionFactory<S> = Arc<dyn ConnectionFactory<S>>;
+
+fn mcp_tool_safety(annotations: Option<&ToolAnnotations>) -> (bool, bool) {
+    let read_only = annotations.and_then(|value| value.read_only_hint).unwrap_or(false);
+    let idempotent = annotations.and_then(|value| value.idempotent_hint).unwrap_or(false);
+    (read_only, read_only || idempotent)
+}
 
 /// Preserve every MCP content block in ADK's multimodal tool-result envelope.
 /// `FunctionResponseData::from_tool_result` consumes this shape in the agent loop.
@@ -736,6 +742,7 @@ where
                 connection_factory: self.connection_factory.clone(),
                 refresh_config: self.refresh_config.clone(),
                 retry_tool_calls: self.retry_tool_calls,
+                annotations: mcp_tool.annotations,
                 task_support,
                 server_supports_tasks,
                 task_config: self.task_config.clone(),
@@ -926,6 +933,8 @@ where
     connection_factory: Option<DynConnectionFactory<S>>,
     refresh_config: RefreshConfig,
     retry_tool_calls: bool,
+    /// Safety hints published by the MCP server for this tool.
+    annotations: Option<ToolAnnotations>,
     /// Per-tool task contract published by the MCP server.
     task_support: TaskSupport,
     /// Whether the negotiated server capabilities permit task-augmented tool calls.
@@ -960,6 +969,8 @@ where
         params: CallToolRequestParams,
     ) -> Result<rmcp::model::CallToolResult> {
         let has_connection_factory = self.connection_factory.is_some();
+        let (_, metadata_allows_replay) = mcp_tool_safety(self.annotations.as_ref());
+        let replay_allowed = self.retry_tool_calls || metadata_allows_replay;
         let mut attempt = 0u32;
 
         loop {
@@ -976,13 +987,13 @@ where
                         attempt,
                         &self.refresh_config,
                         has_connection_factory,
-                        self.retry_tool_calls,
+                        replay_allowed,
                     ) {
                         return Err(mcp_tool_call_error(
                             &self.name,
                             &error,
                             has_connection_factory,
-                            self.retry_tool_calls,
+                            replay_allowed,
                         ));
                     }
 
@@ -1009,7 +1020,7 @@ where
                             &self.name,
                             &error,
                             has_connection_factory,
-                            self.retry_tool_calls,
+                            replay_allowed,
                         ));
                     }
                     attempt += 1;
@@ -1155,6 +1166,14 @@ where
         self.task_support != TaskSupport::Forbidden
     }
 
+    fn is_read_only(&self) -> bool {
+        mcp_tool_safety(self.annotations.as_ref()).0
+    }
+
+    fn is_concurrency_safe(&self) -> bool {
+        mcp_tool_safety(self.annotations.as_ref()).1
+    }
+
     fn parameters_schema(&self) -> Option<Value> {
         self.input_schema.clone()
     }
@@ -1286,6 +1305,23 @@ mod tests {
         let config = RefreshConfig::default().with_max_attempts(3);
         assert!(should_retry_mcp_operation("EOF", 0, &config, true, true));
         assert!(should_retry_mcp_operation("connection reset by peer", 1, &config, true, true));
+    }
+
+    #[test]
+    fn mcp_tool_safety_defaults_to_conservative_values() {
+        assert_eq!(mcp_tool_safety(None), (false, false));
+        assert_eq!(mcp_tool_safety(Some(&ToolAnnotations::default())), (false, false));
+    }
+
+    #[test]
+    fn mcp_tool_safety_maps_read_only_and_idempotent_hints() {
+        let mut read_only = ToolAnnotations::default();
+        read_only.read_only_hint = Some(true);
+        assert_eq!(mcp_tool_safety(Some(&read_only)), (true, true));
+
+        let mut idempotent = ToolAnnotations::default();
+        idempotent.idempotent_hint = Some(true);
+        assert_eq!(mcp_tool_safety(Some(&idempotent)), (false, true));
     }
 
     #[test]

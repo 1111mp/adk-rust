@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MCP tool annotations now control per-tool safety metadata.** Discovered
+  `readOnlyHint` and `idempotentHint` values flow into ADK tool metadata,
+  automatic dispatch, and reconnect replay decisions. Tools without hints keep
+  the conservative sequential, no-replay defaults.
 - **`LlmAgent` skill injection preserves prompt-cache prefixes.** Contextual
   skills are injected into the current user turn instead of leading the request,
   so stable instructions and prior conversation history remain reusable by
