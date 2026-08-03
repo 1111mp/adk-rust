@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its optional source URI. ACP image conversion now round-trips both fields, and
   Vertex sessions route metadata-bearing content through lossless `rawEvent`
   persistence. Existing payloads continue to deserialize with empty metadata.
+- **Schema caches keep adapter results isolated.** `SchemaCache` binds one
+  `SchemaAdapter` instance at construction, so the same input schema cannot
+  return a result produced by another provider or adapter configuration. The
+  deprecated per-call adapter API also keys entries by normalized output to
+  preserve correctness during migration.
 - **`LlmAgent` skill injection preserves prompt-cache prefixes.** Contextual
   skills are injected into the current user turn instead of leading the request,
   so stable instructions and prior conversation history remain reusable by

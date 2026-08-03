@@ -686,7 +686,7 @@ impl GeminiModel {
                 // adapter's empty_schema fallback when none is provided.
                 let schema =
                     tool_decl.get("parameters").cloned().unwrap_or_else(|| adapter.empty_schema());
-                let normalized_schema = cache.get_or_normalize(&schema, adapter);
+                let normalized_schema = cache.normalize(&schema);
 
                 // Build the FunctionDeclaration with normalized values
                 let description =
@@ -700,7 +700,7 @@ impl GeminiModel {
 
                 // Preserve response schema if present (normalized like parameters)
                 if let Some(response) = tool_decl.get("response") {
-                    func_decl_json["response"] = cache.get_or_normalize(response, adapter);
+                    func_decl_json["response"] = cache.normalize(response);
                 }
 
                 // Preserve behavior if present
@@ -1046,7 +1046,9 @@ impl GeminiModel {
         if !req.tools.is_empty() {
             let adapter = self.schema_adapter();
             use std::sync::LazyLock;
-            static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(SchemaCache::new);
+            static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(|| {
+                SchemaCache::for_adapter(std::sync::Arc::new(GeminiSchemaAdapter::new()))
+            });
             let (gemini_tools, tool_config) =
                 Self::build_gemini_tools(&req.tools, adapter, &SCHEMA_CACHE)?;
             for tool in gemini_tools {
@@ -1129,7 +1131,9 @@ impl GeminiModel {
 
         let adapter = self.schema_adapter();
         use std::sync::LazyLock;
-        static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(SchemaCache::new);
+        static SCHEMA_CACHE: LazyLock<SchemaCache> = LazyLock::new(|| {
+            SchemaCache::for_adapter(std::sync::Arc::new(GeminiSchemaAdapter::new()))
+        });
         let (gemini_tools, tool_config) = Self::build_gemini_tools(tools, adapter, &SCHEMA_CACHE)?;
         if !gemini_tools.is_empty() {
             cache_builder = cache_builder.with_tools(gemini_tools);
@@ -1485,7 +1489,7 @@ mod native_tool_tests {
     }
 
     fn test_cache() -> SchemaCache {
-        SchemaCache::new()
+        SchemaCache::for_adapter(std::sync::Arc::new(GeminiSchemaAdapter::new()))
     }
 
     #[test]
