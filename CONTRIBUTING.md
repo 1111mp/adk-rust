@@ -311,7 +311,7 @@ expensive axes just move to a later tier.
 
 | Tier | Trigger | Checks | Blocks merge? |
 |------|---------|--------|---------------|
-| **PR** | pull request (`ci.yml` + `semver.yml`) | `fmt` (prerequisite gate), `clippy --workspace -D warnings`, `nextest --workspace` on Linux (at most once), `feature-coverage` (feature-gated modules like `adk-agent --features codeact`), docs and doctests, standalone examples (4 shards), `templates`, a compile-only macOS build, a Windows workspace build with a targeted sandbox portability smoke, and `semver` (stable strict, beta warn-only) | Yes — this is the required-check set |
+| **PR** | pull request (`ci.yml` + `semver.yml`) | `fmt` (prerequisite gate), `clippy --workspace -D warnings`, `nextest --workspace` on Linux (at most once), `feature-coverage` (feature-gated modules like `adk-agent --features codeact`), docs and doctests, standalone examples (4 shards), `templates`, a compile-only macOS build, a Windows workspace build with a targeted sandbox portability smoke, and `semver` (stable strict, beta warn-only) | Yes — aggregated by `pr-gate`, plus `semver` |
 | **Merge** | `push: main` (`ci-merge.yml`) | cross-platform `nextest --workspace` on macOS/Windows, doc-example compilation | No — runs post-merge |
 | **Nightly** | `schedule` (`ci-nightly.yml`) | feature-combination matrix, `cargo-audit`/`cargo-deny` supply-chain, `#[ignore]` integration tests gated on secrets | No — runs on a schedule |
 
@@ -329,56 +329,25 @@ change lands (or on a schedule) and are informational — they MUST NOT be marke
 branch-protection-required, because requiring a check that doesn't run on a PR
 would block every PR waiting for a status that never arrives.
 
-Branch protection for `main` is configured through the GitHub API / repo settings
-(there is no committed config file). The authoritative required-check set is the
-list below. When updating branch protection, use exactly these status-check
-contexts.
+The `CI / pr-gate` job depends on every job group in `ci.yml` and runs with
+`if: always()`. It succeeds only when every dependency succeeds, including all
+matrix entries. Matrix jobs remain visible individually for diagnosis, but adding
+or removing a matrix entry no longer requires a matching branch-ruleset edit.
 
 ### Required on PRs (branch-protection-required)
 
-These are the Tier-1 jobs from `ci.yml` and `semver.yml`. The status-check context
-name is the job name (matrix jobs include the matrix value in parentheses):
+Require exactly these stable contexts in the `main` ruleset:
 
 | Check context | Workflow | Job |
 |---------------|----------|-----|
-| `fmt` | `ci.yml` | `fmt` |
-| `clippy` | `ci.yml` | `clippy` |
-| `test` | `ci.yml` | `test` |
-| `feature-coverage (adk-agent, codeact)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-agent, ambient)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-model, openrouter)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-sandbox, wasm)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-sandbox, sandbox-linux)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-realtime, integration)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-managed, memory)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-audio, fx)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-rag, lancedb)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-auth, sso)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-server, a2a-v1)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-session, vertex-session)` | `ci.yml` | `feature-coverage` (matrix) |
-| `feature-coverage (adk-acp, server)` | `ci.yml` | `feature-coverage` (matrix) |
-| `docs` | `ci.yml` | `docs` |
-| `examples-compile (0/4)` | `ci.yml` | `examples-compile` (matrix) |
-| `examples-compile (1/4)` | `ci.yml` | `examples-compile` (matrix) |
-| `examples-compile (2/4)` | `ci.yml` | `examples-compile` (matrix) |
-| `examples-compile (3/4)` | `ci.yml` | `examples-compile` (matrix) |
-| `templates` | `ci.yml` | `templates` |
-| `macos` | `ci.yml` | `macos` (compile-only build) |
-| `windows` | `ci.yml` | `windows` (workspace build + sandbox portability smoke) |
+| `pr-gate` | `ci.yml` | Aggregate of every PR-tier CI job below |
 | `semver` | `semver.yml` | `semver` (stable-tier strict; beta is warn-only within the same job) |
 
-Notes:
-- Matrix-job contexts include the matrix value. If you append a
-  `feature-coverage` entry or change the four `examples-compile` shards, update
-  both this table and branch protection.
-- `semver` is a single job that runs the strict stable-crate check (which can fail
-  the job) and a warn-only beta/experimental check (which never fails). Requiring
-  the `semver` job therefore requires only the stable-tier semver gate, keeping the
-  beta check advisory (Requirement 5.3).
-- The always-on `feature-coverage (adk-agent, codeact)` job is the merge-blocking
-  CodeAct signal. (`adk-codeact-monty` itself is a workspace member since Monty
-  reached crates.io, so `clippy`/`test` cover it like any other crate; the
-  former `codeact-monty.yml` workflow is gone.)
+`pr-gate` covers `fmt`, `clippy`, Linux workspace tests, every
+`feature-coverage` matrix entry, docs and doctests, every standalone-example
+shard, templates, the macOS build, and the Windows build plus sandbox portability
+smokes. `semver` stays separate because its workflow has an independent trigger
+and keeps stable crates strict while beta/experimental crates remain advisory.
 
 ### NOT required (informational tiers)
 
@@ -392,54 +361,17 @@ These run post-merge or on a schedule and MUST NOT be branch-protection-required
 
 ### Applying the required-check set
 
-A maintainer with admin rights can apply the set above with the GitHub CLI. This
-requires new PR-tier job names to be stable and green first (spec tasks 6 and 10),
-since branch protection waits on a context that must actually report:
+A maintainer with admin rights applies this through **Settings → Rules →
+Rulesets → `adk-rust-ruleset` → Require status checks to pass**. First merge the
+workflow change and confirm that `CI / pr-gate` has reported successfully on a
+pull request. Then remove the individual CI/matrix contexts and retain only:
 
-```bash
-gh api -X PUT repos/zavora-ai/adk-rust/branches/main/protection \
-  --input - <<'JSON'
-{
-  "required_status_checks": {
-    "strict": true,
-    "checks": [
-      { "context": "fmt" },
-      { "context": "clippy" },
-      { "context": "test" },
-      { "context": "feature-coverage (adk-agent, codeact)" },
-      { "context": "feature-coverage (adk-agent, ambient)" },
-      { "context": "feature-coverage (adk-model, openrouter)" },
-      { "context": "feature-coverage (adk-sandbox, wasm)" },
-      { "context": "feature-coverage (adk-sandbox, sandbox-linux)" },
-      { "context": "feature-coverage (adk-realtime, integration)" },
-      { "context": "feature-coverage (adk-managed, memory)" },
-      { "context": "feature-coverage (adk-audio, fx)" },
-      { "context": "feature-coverage (adk-rag, lancedb)" },
-      { "context": "feature-coverage (adk-auth, sso)" },
-      { "context": "feature-coverage (adk-server, a2a-v1)" },
-      { "context": "feature-coverage (adk-session, vertex-session)" },
-      { "context": "feature-coverage (adk-acp, server)" },
-      { "context": "docs" },
-      { "context": "examples-compile (0/4)" },
-      { "context": "examples-compile (1/4)" },
-      { "context": "examples-compile (2/4)" },
-      { "context": "examples-compile (3/4)" },
-      { "context": "templates" },
-      { "context": "macos" },
-      { "context": "windows" },
-      { "context": "semver" }
-    ]
-  },
-  "enforce_admins": false,
-  "required_pull_request_reviews": { "required_approving_review_count": 1 },
-  "restrictions": null
-}
-JSON
-```
+- `pr-gate`
+- `semver`
 
-Adjust `required_pull_request_reviews`, `enforce_admins`, and `restrictions` to
-match the project's review policy; the merge-blocking contract for this spec is the
-`checks` list above.
+Keep **Require branches to be up to date before merging** enabled. Do not change
+the ruleset's review, deletion, or non-fast-forward policies as part of this
+status-check migration.
 
 ## Build Commands
 

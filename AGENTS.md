@@ -166,7 +166,7 @@ is preserved (see the `ci-pipeline-restructure` spec). No coverage is dropped �
 expensive axes move to a later tier.
 
 - **PR tier** (`ci.yml` + `semver.yml`, on pull requests) — the merge-blocking
-  set: `fmt` (prerequisite gate), `clippy --workspace --all-targets -D warnings`,
+  coverage: `fmt` (prerequisite gate), `clippy --workspace --all-targets -D warnings`,
   `nextest --workspace` (Linux, runs at most once), `feature-coverage` for
   feature-gated modules default builds skip (e.g. `adk-agent --features codeact`),
   `docs` (`cargo doc --workspace --no-deps` plus doctests), standalone examples
@@ -181,8 +181,10 @@ expensive axes move to a later tier.
   checks, and `#[ignore]` integration tests gated on available secrets. Not
   branch-protection-required.
 
-Only the PR tier gates merges. See CONTRIBUTING.md ("Branch Protection — Required
-Status Checks") for the authoritative required-check set.
+Only the PR tier gates merges. Branch protection requires the aggregate
+`pr-gate` context plus the separate `semver` context; `pr-gate` fails unless
+every `ci.yml` dependency and matrix entry succeeds. See CONTRIBUTING.md
+("Branch Protection — Required Status Checks") for the authoritative set.
 
 ### Local git hooks (lefthook)
 
@@ -747,7 +749,7 @@ pub async fn swap_adapter(&self, adapter_name: &str) -> Result<()> { ... }
 - **Reference**: Include `Fixes #123` or similar in the PR description.
 - **Scope**: Keep PRs focused — one logical change per PR. Don't mix unrelated changes.
 - **Local gates before pushing**: Run `fmt`, `clippy`, `test`, and `check` via `devenv shell`. These are local shorthand, not CI job names — `check` has no CI job at all.
-- **CI gates that block merge**: The PR tier only (see [CI cost tiers](#ci-cost-tiers)). CONTRIBUTING.md ("Branch Protection — Required Status Checks") is authoritative for the required-check set.
+- **CI gates that block merge**: `pr-gate` (all `ci.yml` PR-tier jobs) and `semver`; see [CI cost tiers](#ci-cost-tiers). CONTRIBUTING.md ("Branch Protection — Required Status Checks") is authoritative.
 
 ### PR Checklist requirements
 
