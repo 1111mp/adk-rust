@@ -104,7 +104,7 @@ fn content_to_input_items(content: &Content) -> Vec<InputItem> {
                 })));
             }
 
-            Part::FunctionResponse { function_response, id } => {
+            Part::FunctionResponse { function_response, id, .. } => {
                 let call_id = id.clone().unwrap_or_else(|| "unknown".to_string());
                 let output_text =
                     crate::tool_result::serialize_tool_result(&function_response.response);
@@ -118,7 +118,7 @@ fn content_to_input_items(content: &Content) -> Vec<InputItem> {
                 )));
             }
 
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 if mime_type.starts_with("image/") {
                     let data_uri =
                         format!("data:{mime_type};base64,{}", attachment::encode_base64(data));

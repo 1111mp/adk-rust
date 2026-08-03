@@ -109,7 +109,9 @@ fn content_to_message(content: &Content) -> Value {
             })
         }
         "function" | "tool" => {
-            if let Some(Part::FunctionResponse { function_response, id }) = content.parts.first() {
+            if let Some(Part::FunctionResponse { function_response, id, .. }) =
+                content.parts.first()
+            {
                 let tool_call_id = id.clone().unwrap_or_else(|| "unknown".to_string());
                 serde_json::json!({
                     "role": "tool",
@@ -487,6 +489,7 @@ mod tests {
                     serde_json::json!({"temp": 72}),
                 ),
                 id: Some("call_123".to_string()),
+                annotations: None,
             }],
         };
         let msg = content_to_message(&content);
@@ -751,6 +754,7 @@ mod tests {
                     serde_json::json!({"ok": true}),
                 ),
                 id: None,
+                annotations: None,
             }],
         };
         let msg = content_to_message(&content);

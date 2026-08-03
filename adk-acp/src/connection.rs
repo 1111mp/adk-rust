@@ -278,7 +278,7 @@ pub async fn prompt_agent_with_policy(
 ///
 /// let mut content = Content::new("user");
 /// content.parts.push(Part::Text { text: "What is in this image?".into() });
-/// content.parts.push(Part::InlineData { mime_type: "image/png".into(), data: png_bytes });
+/// content.parts.push(Part::inline_data("image/png", png_bytes));
 ///
 /// let config = AcpAgentConfig::new("my-coding-agent --acp");
 /// let response = prompt_agent_content_with_policy(

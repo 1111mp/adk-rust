@@ -85,11 +85,11 @@ fn adk_content_to_response_item(
             Part::Thinking { thinking, .. } => {
                 push_text_fragment(thinking, &mut text_fragments, &mut structured_parts)
             }
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 flush_text_fragments(&mut text_fragments, &mut structured_parts);
                 structured_parts.push(response_part_from_inline_data(mime_type, data));
             }
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, .. } => {
                 flush_text_fragments(&mut text_fragments, &mut structured_parts);
                 structured_parts.push(response_part_from_file_uri(mime_type, file_uri));
             }
@@ -103,7 +103,7 @@ fn adk_content_to_response_item(
                     ..Default::default()
                 });
             }
-            Part::FunctionResponse { function_response, id } => {
+            Part::FunctionResponse { function_response, id, .. } => {
                 return Ok(OpenRouterResponseInputItem {
                     kind: "function_call_output".to_string(),
                     id: id.clone(),

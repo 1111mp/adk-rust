@@ -103,11 +103,13 @@ both directions. Embedded-resource prompt content maps to
 `Part::EmbeddedResource`, preserving the source URI, optional MIME type, and
 contents; text resources are preserved verbatim while binary resources are
 base64-encoded on the wire and decoded to raw bytes internally. Image and audio
-prompt content maps to `Part::InlineData`, preserving the MIME type and decoded
-bytes. Because the prompt handler accepts embedded-resource, image, and audio
-content, the server advertises the `embedded_context`, `image`, and `audio`
-prompt capabilities. A prompt carrying a content type the server has not
-advertised is rejected with a descriptive error rather than partially handled.
+prompt content maps to `Part::InlineData`, preserving the MIME type, decoded
+bytes, annotations, and an image's optional source URI. These fields remain in
+session JSON and are restored by `session/load`. Because the prompt handler
+accepts embedded-resource, image, and audio content, the server advertises the
+`embedded_context`, `image`, and `audio` prompt capabilities. A prompt carrying
+a content type the server has not advertised is rejected with a descriptive
+error rather than partially handled.
 
 ## Load and history replay
 

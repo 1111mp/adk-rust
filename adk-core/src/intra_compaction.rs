@@ -203,6 +203,7 @@ mod tests {
                     serde_json::json!({"temp": 72}),
                 ),
                 id: None,
+                annotations: None,
             }],
         });
         let tokens = estimate_tokens(&[event], 4);

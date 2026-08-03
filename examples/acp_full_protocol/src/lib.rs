@@ -160,6 +160,7 @@ impl Agent for ScriptedAgent {
                         content.parts.push(Part::FunctionResponse {
                             function_response: FunctionResponseData::new(CONFIRM_TOOL, result),
                             id: Some(CONFIRM_CALL_ID.to_string()),
+                            annotations: None,
                         });
                         result_event.set_content(content);
                         yield Ok(result_event);
@@ -196,7 +197,7 @@ impl Agent for ScriptedAgent {
                     Part::EmbeddedResource { resource } => {
                         echoes.push(describe_embedded(resource));
                     }
-                    Part::InlineData { mime_type, data } => {
+                    Part::InlineData { mime_type, data, .. } => {
                         echoes.push(format!("inline-data:{mime_type}:{}", data.len()));
                     }
                     _ => {}
@@ -254,6 +255,7 @@ impl Agent for ScriptedAgent {
                     json!({ "path": "src/main.rs", "content": "fn main() {}" }),
                 ),
                 id: Some("read-1".to_string()),
+                annotations: None,
             });
             result_event.set_content(result_content);
             yield Ok(result_event);

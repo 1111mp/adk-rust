@@ -534,6 +534,7 @@ impl SessionLoop {
                                 .unwrap_or("image/png")
                                 .to_string(),
                             file_uri: url.to_string(),
+                            annotations: None,
                         });
                     }
                 }
@@ -541,6 +542,7 @@ impl SessionLoop {
                     parts.push(Part::FileData {
                         mime_type: "application/octet-stream".to_string(),
                         file_uri: file_id.clone(),
+                        annotations: None,
                     });
                 }
             }

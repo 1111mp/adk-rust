@@ -1009,6 +1009,7 @@ mod tests {
                         serde_json::json!({"result": "ok"}),
                     ),
                     id: Some("call_1".to_string()),
+                    annotations: None,
                 }],
             },
             Content {

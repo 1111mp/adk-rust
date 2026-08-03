@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Inline and file content metadata survives session persistence.**
+  `Part::InlineData`, `Part::FileData`, `Part::FunctionResponse`, and multimodal
+  function-response parts retain optional annotations; inline data also retains
+  its optional source URI. ACP image conversion now round-trips both fields, and
+  Vertex sessions route metadata-bearing content through lossless `rawEvent`
+  persistence. Existing payloads continue to deserialize with empty metadata.
 - **MCP tool annotations now control per-tool safety metadata.** Discovered
   `readOnlyHint` and `idempotentHint` values flow into ADK tool metadata,
   automatic dispatch, and reconnect replay decisions. Tools without hints keep
