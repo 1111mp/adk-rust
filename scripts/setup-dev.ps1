@@ -137,14 +137,12 @@ foreach ($tool in 'rustc', 'cargo') {
 # aws-lc-sys needs cl.exe for its C sources.
 if (Test-Tool 'cl') {
     Write-Ok 'cl.exe (MSVC C/C++ compiler)'
-    # adk-sandbox forwards LIB to rustc so it can reach the MSVC linker. Without
-    # it, a_working_program_still_runs fails even though cl.exe is on PATH.
+    # adk-sandbox forwards LIB to rustc when a Developer shell supplies it and
+    # otherwise discovers the same SDK paths from the installed Build Tools.
     if ($env:LIB) {
         Write-Ok 'LIB set (MSVC library path available to the sandbox tests)'
     } else {
-        Write-Warn 'LIB not set - adk-sandbox a_working_program_still_runs will fail'
-        Write-Host '         Run the test suite from a Developer PowerShell, or call'
-        Write-Host '         vcvars64.bat first.'
+        Write-Ok 'LIB not set (adk-sandbox will discover the installed MSVC SDK paths)'
     }
 } else {
     Write-Warn 'cl.exe not on PATH - install Visual Studio Build Tools with the'
