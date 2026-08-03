@@ -250,7 +250,7 @@ pub fn convert_tools(
             let parameters = decl
                 .get("parameters")
                 .cloned()
-                .map(|schema| cache.get_or_normalize(&schema, adapter))
+                .map(|schema| cache.normalize(&schema))
                 .or_else(|| Some(adapter.empty_schema()));
 
             ChatCompletionTools::Function(ChatCompletionTool {
@@ -800,7 +800,7 @@ mod tests {
         );
 
         let adapter = OpenAiSchemaAdapter;
-        let cache = SchemaCache::new();
+        let cache = SchemaCache::for_adapter(std::sync::Arc::new(OpenAiSchemaAdapter));
         let openai_tools = convert_tools(&tools, &adapter, &cache);
         assert_eq!(openai_tools.len(), 1);
         if let ChatCompletionTools::Function(tool) = &openai_tools[0] {
