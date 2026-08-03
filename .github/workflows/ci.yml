@@ -59,16 +59,6 @@ jobs:
         name: devenv
     - run: nix profile install nixpkgs#devenv
 
-    - name: Cache cargo artifacts
-      uses: actions/cache@v6
-      with:
-        path: |
-          ~/.cache/sccache
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: clippy-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: clippy-${{ runner.os }}-
 
     - name: Run clippy
       run: CI=true devenv shell ws-clippy --message-format=json | tee clippy.json
@@ -101,17 +91,6 @@ jobs:
       with:
         name: devenv
     - run: nix profile install nixpkgs#devenv
-
-    - name: Cache cargo artifacts
-      uses: actions/cache@v6
-      with:
-        path: |
-          ~/.cache/sccache
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: test-${{ runner.os }}-
 
     - name: Run tests
       run: CI=true devenv shell ws-test-ci | tee test.log
@@ -197,6 +176,7 @@ jobs:
       with:
         components: clippy
         cache-key: feature-coverage-${{ matrix.package }}-${{ matrix.features }}
+        cache-save: 'false'
 
     # protoc is required by lancedb's build script (adk-rag --features lancedb).
     # Unconditional rather than gated on the matrix entry: the job header
@@ -233,17 +213,6 @@ jobs:
       with:
         name: devenv
     - run: nix profile install nixpkgs#devenv
-
-    - name: Cache cargo artifacts
-      uses: actions/cache@v6
-      with:
-        path: |
-          ~/.cache/sccache
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: docs-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: docs-${{ runner.os }}-
 
     - name: Check documentation coverage
       env:
@@ -298,6 +267,7 @@ jobs:
       uses: ./.github/actions/setup-rust
       with:
         cache-key: pr-examples-compile-${{ matrix.shard }}
+        cache-save: 'false'
 
     - name: Install system dependencies
       run: |
@@ -326,17 +296,6 @@ jobs:
       with:
         name: devenv
     - run: nix profile install nixpkgs#devenv
-
-    - name: Cache cargo artifacts
-      uses: actions/cache@v6
-      with:
-        path: |
-          ~/.cache/sccache
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: templates-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: templates-${{ runner.os }}-
 
     - name: Check cargo-adk templates
       run: |
@@ -374,7 +333,9 @@ jobs:
       uses: ./.github/actions/setup-rust
       with:
         neutralize-wild: 'false'
-        cache-key: macos
+        cache-key: cross-platform-test-macos-latest
+        cache-shared-key: cross-platform-test
+        cache-save: 'false'
 
     - name: Install system dependencies
       run: brew install cmake protobuf
@@ -400,7 +361,9 @@ jobs:
       uses: ./.github/actions/setup-rust
       with:
         neutralize-wild: 'false'
-        cache-key: windows
+        cache-key: cross-platform-test-windows-latest
+        cache-shared-key: cross-platform-test
+        cache-save: 'false'
 
     - name: Install cmake
       uses: lukka/get-cmake@latest
