@@ -59,6 +59,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **adk-realtime: `DisconnectReason`, so a closed stream can say why.**
+  `RealtimeSession::disconnect_reason()` reports the close code and reason the
+  provider sent, and `RealtimeRunner::disconnect_reason()` forwards it. The
+  Gemini session records its close frame before the event stream ends.
+
+  Applications that *poll* `RealtimeRunner::next_event()` never reach the
+  runner's `on_disconnect` dispatch, and `next_event` returns a bare `None`
+  whether the provider deliberately closed an idle session or the socket died.
+  Both therefore landed in the caller's terminal record as the same generic
+  stream failure — one that reads like a network defect when it was a policy
+  close. Google's Live API closes an idle session with `1008` and
+  `"The operation was aborted."`; that string was reachable in logs but nowhere
+  a durable record could use it.
+
+  The trait method is defaulted to `None`, so existing `RealtimeSession`
+  implementations are unaffected and this is not a breaking change.
+
 - **`scripts/setup-dev.ps1` — first-time setup for Windows.** `make setup`,
   `scripts/setup-dev.sh`, and `devenv shell` all require a POSIX shell, so
   Windows had no scripted path. Checks the toolchain and MSVC environment,
