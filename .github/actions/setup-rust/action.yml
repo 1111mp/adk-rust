@@ -18,6 +18,18 @@ inputs:
     description: 'Prefix for the build cache.'
     required: false
     default: ${{ github.job }}
+  cache-shared-key:
+    description: >-
+      Stable key shared by jobs that compile the same target. When set,
+      rust-cache uses this instead of its automatic job-id key.
+    required: false
+    default: ''
+  cache-save:
+    description: >-
+      Save the cache after the job. Set to "false" on pull requests so their
+      merge-ref caches do not evict reusable default-branch caches.
+    required: false
+    default: 'true'
   enable-cache:
     description: 'Enable the persistent Rust build cache.'
     required: false
@@ -61,3 +73,5 @@ runs:
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
         prefix-key: ${{ inputs.cache-key }}
+        shared-key: ${{ inputs.cache-shared-key }}
+        save-if: ${{ inputs.cache-save }}

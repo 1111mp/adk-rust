@@ -28,6 +28,7 @@ jobs:
       uses: ./.github/actions/setup-rust
       with:
         cache-key: semver
+        cache-save: 'false'
 
     - name: Install cargo-semver-checks
       uses: taiki-e/install-action@v2.85.5
