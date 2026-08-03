@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its optional source URI. ACP image conversion now round-trips both fields, and
   Vertex sessions route metadata-bearing content through lossless `rawEvent`
   persistence. Existing payloads continue to deserialize with empty metadata.
+- **MCP tool annotations now control per-tool safety metadata.** Discovered
+  `readOnlyHint` and `idempotentHint` values flow into ADK tool metadata,
+  automatic dispatch, and reconnect replay decisions. Tools without hints keep
+  the conservative sequential, no-replay defaults.
 - **Schema caches keep adapter results isolated.** `SchemaCache` binds one
   `SchemaAdapter` instance at construction, so the same input schema cannot
   return a result produced by another provider or adapter configuration. The

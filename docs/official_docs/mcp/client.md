@@ -55,6 +55,15 @@ non-reproducible.
 the server's input and output schemas unchanged. The selected model provider
 normalizes a copy of the schema when it builds its request.
 
+The adapter also retains MCP tool annotations. A `readOnlyHint` marks the ADK
+tool as read-only and concurrency-safe; an `idempotentHint` permits safe replay
+after reconnecting but does not by itself make the tool eligible for automatic
+parallel dispatch. Missing hints keep both behaviors disabled.
+
+> **Important:** MCP annotations are server-published hints. Use automatic
+> replay and dispatch metadata only with servers inside the application's trust
+> boundary.
+
 ```rust
 let reviewed = McpToolset::new(client).with_filter(|name| {
     matches!(name, "read_order" | "read_policy" | "request_replacement")
