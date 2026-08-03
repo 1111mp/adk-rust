@@ -711,6 +711,17 @@ impl RealtimeRunner {
     ///     }
     /// }
     /// ```
+    /// Why the provider ended the stream, once [`Self::next_event`] has returned
+    /// `None`.
+    ///
+    /// Callers that poll `next_event` never see the runner's `on_disconnect`
+    /// dispatch, so without this a provider that deliberately closed an idle
+    /// session is indistinguishable from a dropped socket — and both get
+    /// recorded as the same generic stream failure.
+    pub async fn disconnect_reason(&self) -> Option<crate::session::DisconnectReason> {
+        self.session_handle().await.ok().and_then(|session| session.disconnect_reason())
+    }
+
     pub async fn next_event(&self) -> Option<Result<ServerEvent>> {
         let session = match self.session_handle().await {
             Ok(session) => session,
