@@ -46,11 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cmd.exe` does not implement `CommandLineToArgvW` escaping. The tests now write
   a temporary script — PowerShell on Windows, `sh` elsewhere — so no payload
   crosses the command line.
-- **adk-sandbox's `a_working_program_still_runs` no longer fails outside a
-  Developer shell.** The `compile_lib=true` assertion covers `LIB` forwarding,
-  which has nothing to forward when the host has no `LIB` set. It now states that
-  precondition instead of failing; the `runtime_lib=false` isolation assertion is
-  unconditional as before.
+- **Sandboxed Rust compilation discovers the Windows SDK outside a Developer
+  shell.** `ProcessBackend` now obtains the MSVC `PATH`, `LIB`, `LIBPATH`, and
+  `INCLUDE` values from the installed Build Tools when the parent environment
+  does not provide them. The compiler receives the SDK import-library paths while
+  the generated program still starts with a cleared environment. The exact
+  compile-and-run regression now runs in the PR-tier Windows smoke gate.
 - **adk-sandbox now preserves Windows shell quoting and selects the intended Rust
   linker.** Raw command text reaches `cmd.exe` without `CommandLineToArgvW`
   escaping, so quoted executable and script paths work. Direct sandboxed Rust

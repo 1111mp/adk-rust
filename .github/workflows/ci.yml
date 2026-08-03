@@ -413,6 +413,9 @@ jobs:
     - name: Run sandbox output-cap portability smoke
       run: cargo test -p adk-sandbox --test output_cap_tests
 
+    - name: Run sandbox Rust compilation portability smoke
+      run: cargo test -p adk-sandbox --test process_enforcement_tests a_working_program_still_runs -- --exact
+
     - name: Build summary
       if: always()
       run: echo "### 🪟 Windows build and sandbox portability smoke passed" >> $env:GITHUB_STEP_SUMMARY
