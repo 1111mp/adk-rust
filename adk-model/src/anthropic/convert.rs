@@ -227,7 +227,7 @@ pub fn convert_tools(
 
             let input_schema =
                 decl.get("parameters").cloned().unwrap_or_else(|| adapter.empty_schema());
-            let normalized_schema = cache.get_or_normalize(&input_schema, adapter);
+            let normalized_schema = cache.normalize(&input_schema);
 
             let normalized_name = adapter.normalize_tool_name(name);
 
@@ -691,7 +691,7 @@ mod tests {
         );
 
         let adapter = AnthropicSchemaAdapter;
-        let cache = SchemaCache::new();
+        let cache = SchemaCache::for_adapter(std::sync::Arc::new(AnthropicSchemaAdapter));
         let claude_tools =
             convert_tools(&tools, &adapter, &cache).expect("tool conversion should succeed");
         assert_eq!(claude_tools.len(), 1);
@@ -712,7 +712,7 @@ mod tests {
         );
 
         let adapter = AnthropicSchemaAdapter;
-        let cache = SchemaCache::new();
+        let cache = SchemaCache::for_adapter(std::sync::Arc::new(AnthropicSchemaAdapter));
         let claude_tools =
             convert_tools(&tools, &adapter, &cache).expect("tool conversion should succeed");
         assert_eq!(claude_tools.len(), 1);
