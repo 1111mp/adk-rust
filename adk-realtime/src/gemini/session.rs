@@ -206,6 +206,12 @@ pub struct GeminiRealtimeSession {
     receiver: Arc<Mutex<WsSource>>,
     audio_buffer: Arc<ParkingMutex<BytesMut>>,
     event_queue: Arc<Mutex<std::collections::VecDeque<ServerEvent>>>,
+    /// The close frame the server sent, if it sent one.
+    ///
+    /// Recorded because the event stream reports a deliberate server-side
+    /// close and a dead socket as the same `None`, so a polling caller cannot
+    /// tell an aborted session from a broken one without it.
+    last_disconnect: Arc<ParkingMutex<Option<crate::session::DisconnectReason>>>,
 }
 
 impl GeminiRealtimeSession {
@@ -327,6 +333,7 @@ impl GeminiRealtimeSession {
             writer_task: Arc::new(Mutex::new(Some(writer_task))),
             receiver: Arc::new(Mutex::new(source)),
             audio_buffer: Arc::new(ParkingMutex::new(BytesMut::new())),
+            last_disconnect: Arc::new(ParkingMutex::new(None)),
             event_queue: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         };
 
@@ -484,7 +491,26 @@ impl GeminiRealtimeSession {
                 )))),
             },
             Some(Ok(Message::Close(close_frame))) => {
-                tracing::error!("WebSocket closed by server: {:?}", close_frame);
+                // Structured, because a server-initiated close and a dead
+                // transport both surface downstream as the same `None` and get
+                // the same terminal reason. The code and reason are the only
+                // thing distinguishing "the provider aborted an idle session"
+                // from "the network dropped", and `{:?}` on the whole frame
+                // buries both inside a Debug string nothing can filter on.
+                tracing::error!(
+                    close_code =
+                        close_frame.as_ref().map(|frame| u16::from(frame.code)).unwrap_or_default(),
+                    close_reason =
+                        close_frame.as_ref().map(|frame| frame.reason.as_ref()).unwrap_or(""),
+                    "WebSocket closed by server"
+                );
+                *self.last_disconnect.lock() = Some(crate::session::DisconnectReason {
+                    code: close_frame.as_ref().map(|frame| u16::from(frame.code)),
+                    reason: close_frame
+                        .as_ref()
+                        .map(|frame| frame.reason.to_string())
+                        .unwrap_or_default(),
+                });
                 self.connected.store(false, Ordering::SeqCst);
                 None
             }
@@ -656,6 +682,10 @@ impl RealtimeSession for GeminiRealtimeSession {
 
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::SeqCst)
+    }
+
+    fn disconnect_reason(&self) -> Option<crate::session::DisconnectReason> {
+        self.last_disconnect.lock().clone()
     }
 
     async fn send_audio(&self, audio: &AudioChunk) -> Result<()> {
