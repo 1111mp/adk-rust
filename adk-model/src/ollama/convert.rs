@@ -13,10 +13,10 @@ pub fn content_to_chat_message(content: &Content) -> Option<ChatMessage> {
         .filter_map(|p| match p {
             Part::Text { text } => Some(text.clone()),
             Part::Thinking { thinking, .. } => Some(thinking.clone()),
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 Some(attachment::inline_attachment_to_text(mime_type, data))
             }
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, .. } => {
                 Some(attachment::file_attachment_to_text(mime_type, file_uri))
             }
             _ => None,
@@ -166,10 +166,7 @@ mod tests {
     fn content_to_chat_message_keeps_inline_attachment_payload() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::InlineData {
-                mime_type: "application/pdf".to_string(),
-                data: b"%PDF".to_vec(),
-            }],
+            parts: vec![Part::inline_data("application/pdf", b"%PDF".to_vec())],
         };
         let message = content_to_chat_message(&content).expect("message should be created");
         assert!(message.content.contains("application/pdf"));
@@ -180,10 +177,7 @@ mod tests {
     fn content_to_chat_message_keeps_file_attachment_payload() {
         let content = Content {
             role: "user".to_string(),
-            parts: vec![Part::FileData {
-                mime_type: "text/csv".to_string(),
-                file_uri: "https://example.com/data.csv".to_string(),
-            }],
+            parts: vec![Part::file_data("text/csv", "https://example.com/data.csv")],
         };
         let message = content_to_chat_message(&content).expect("message should be created");
         assert!(message.content.contains("text/csv"));

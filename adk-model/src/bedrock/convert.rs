@@ -244,7 +244,7 @@ fn convert_one_part(
                 .ok()?;
             Some(ContentBlock::ToolUse(tool_use))
         }
-        Part::FunctionResponse { function_response, id } => {
+        Part::FunctionResponse { function_response, id, .. } => {
             let tool_result = ToolResultBlock::builder()
                 .tool_use_id(id.clone().unwrap_or_else(|| "unknown".to_string()))
                 .content(ToolResultContentBlock::Text(crate::tool_result::serialize_tool_result(
@@ -263,7 +263,7 @@ fn convert_one_part(
                 Some(ContentBlock::Text(thinking.clone()))
             }
         }
-        Part::InlineData { mime_type, data } => {
+        Part::InlineData { mime_type, data, .. } => {
             if let Some(fmt) = mime_to_bedrock_image_format(mime_type) {
                 let source = ImageSource::Bytes(aws_smithy_types::Blob::new(data.as_slice()));
                 ImageBlock::builder()
@@ -543,6 +543,8 @@ fn bedrock_content_blocks_to_parts(blocks: &[ContentBlock]) -> Vec<Part> {
                         Some(Part::InlineData {
                             mime_type: mime_type.to_string(),
                             data: blob.as_ref().to_vec(),
+                            uri: None,
+                            annotations: None,
                         })
                     } else {
                         None
@@ -869,6 +871,7 @@ mod tests {
                     serde_json::json!({"temp": 72}),
                 ),
                 id: Some("call_123".to_string()),
+                annotations: None,
             }],
         }];
 
@@ -908,6 +911,7 @@ mod tests {
                         serde_json::json!({"tier": "growth"}),
                     ),
                     id: Some("call_review".to_string()),
+                    annotations: None,
                 }],
             },
             Content {
@@ -918,6 +922,7 @@ mod tests {
                         serde_json::json!({"components_analyzed": 2}),
                     ),
                     id: Some("call_threats".to_string()),
+                    annotations: None,
                 }],
             },
         ];
@@ -1285,10 +1290,7 @@ mod tests {
             role: "user".to_string(),
             parts: vec![
                 Part::Text { text: "What is in this image?".to_string() },
-                Part::InlineData {
-                    mime_type: "image/png".to_string(),
-                    data: vec![0x89, 0x50, 0x4E, 0x47],
-                },
+                Part::inline_data("image/png", vec![0x89, 0x50, 0x4E, 0x47]),
             ],
         }];
 
@@ -1302,10 +1304,7 @@ mod tests {
 
     #[test]
     fn test_inline_jpeg_converts_to_image_block() {
-        let parts = vec![Part::InlineData {
-            mime_type: "image/jpeg".to_string(),
-            data: vec![0xFF, 0xD8, 0xFF],
-        }];
+        let parts = vec![Part::inline_data("image/jpeg", vec![0xFF, 0xD8, 0xFF])];
         let blocks = adk_parts_to_bedrock(&parts);
         assert_eq!(blocks.len(), 1);
         let img = blocks[0].as_image().unwrap();
@@ -1314,10 +1313,7 @@ mod tests {
 
     #[test]
     fn test_inline_pdf_converts_to_document_block() {
-        let parts = vec![Part::InlineData {
-            mime_type: "application/pdf".to_string(),
-            data: b"%PDF-1.4".to_vec(),
-        }];
+        let parts = vec![Part::inline_data("application/pdf", b"%PDF-1.4".to_vec())];
         let blocks = adk_parts_to_bedrock(&parts);
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].is_document());
@@ -1325,10 +1321,7 @@ mod tests {
 
     #[test]
     fn test_inline_csv_converts_to_document_block() {
-        let parts = vec![Part::InlineData {
-            mime_type: "text/csv".to_string(),
-            data: b"a,b,c\n1,2,3".to_vec(),
-        }];
+        let parts = vec![Part::inline_data("text/csv", b"a,b,c\n1,2,3".to_vec())];
         let blocks = adk_parts_to_bedrock(&parts);
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].is_document());
@@ -1336,20 +1329,14 @@ mod tests {
 
     #[test]
     fn test_unsupported_mime_type_skipped() {
-        let parts = vec![Part::InlineData {
-            mime_type: "application/octet-stream".to_string(),
-            data: vec![0xCA, 0xFE],
-        }];
+        let parts = vec![Part::inline_data("application/octet-stream", vec![0xCA, 0xFE])];
         let blocks = adk_parts_to_bedrock(&parts);
         assert!(blocks.is_empty());
     }
 
     #[test]
     fn test_file_data_image_url_becomes_text_reference() {
-        let parts = vec![Part::FileData {
-            mime_type: "image/jpeg".to_string(),
-            file_uri: "https://example.com/photo.jpg".to_string(),
-        }];
+        let parts = vec![Part::file_data("image/jpeg", "https://example.com/photo.jpg")];
         let blocks = adk_parts_to_bedrock(&parts);
         assert_eq!(blocks.len(), 1);
         let text = blocks[0].as_text().unwrap();
@@ -1359,10 +1346,8 @@ mod tests {
 
     #[test]
     fn test_file_data_unsupported_mime_skipped() {
-        let parts = vec![Part::FileData {
-            mime_type: "application/octet-stream".to_string(),
-            file_uri: "https://example.com/data.bin".to_string(),
-        }];
+        let parts =
+            vec![Part::file_data("application/octet-stream", "https://example.com/data.bin")];
         let blocks = adk_parts_to_bedrock(&parts);
         assert!(blocks.is_empty());
     }
@@ -1379,7 +1364,7 @@ mod tests {
         let parts = bedrock_content_blocks_to_parts(&[ContentBlock::Image(image_block)]);
         assert_eq!(parts.len(), 1);
         match &parts[0] {
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 assert_eq!(mime_type, "image/png");
                 assert_eq!(data, &image_bytes);
             }

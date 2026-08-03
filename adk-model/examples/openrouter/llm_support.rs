@@ -34,7 +34,7 @@ pub fn print_llm_responses(responses: &[LlmResponse]) {
                             trim_for_display(&args.to_string())
                         );
                     }
-                    Part::FunctionResponse { function_response, id } => {
+                    Part::FunctionResponse { function_response, id, .. } => {
                         println!(
                             "  function_response: id={} name={} body={}",
                             id.as_deref().unwrap_or("<none>"),
@@ -42,10 +42,10 @@ pub fn print_llm_responses(responses: &[LlmResponse]) {
                             trim_for_display(&function_response.response.to_string())
                         );
                     }
-                    Part::InlineData { mime_type, data } => {
+                    Part::InlineData { mime_type, data, .. } => {
                         println!("  inline_data: mime_type={mime_type} bytes={}", data.len());
                     }
-                    Part::FileData { mime_type, file_uri } => {
+                    Part::FileData { mime_type, file_uri, .. } => {
                         println!("  file_data: mime_type={mime_type} uri={file_uri}");
                     }
                     Part::ServerToolCall { server_tool_call } => {

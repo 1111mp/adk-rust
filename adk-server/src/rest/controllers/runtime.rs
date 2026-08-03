@@ -581,6 +581,8 @@ fn build_content_with_attachments(
                 content.parts.push(adk_core::Part::InlineData {
                     mime_type: attachment.mime_type.clone(),
                     data,
+                    uri: None,
+                    annotations: None,
                 });
             }
             Err(e) => {
@@ -621,6 +623,8 @@ fn build_content_from_parts(parts: &[MessagePart]) -> Result<adk_core::Content, 
                     content.parts.push(adk_core::Part::InlineData {
                         mime_type: inline_data.mime_type.clone(),
                         data,
+                        uri: None,
+                        annotations: None,
                     });
                 }
                 Err(e) => {
@@ -848,7 +852,7 @@ fn translate_ag_ui_event(event: &adk_core::Event, thread_id: &str, run_id: &str)
                     }));
                 }
             }
-            adk_core::Part::FunctionResponse { function_response, id } => {
+            adk_core::Part::FunctionResponse { function_response, id, .. } => {
                 let tool_call_id =
                     id.clone().unwrap_or_else(|| format!("{}-tool-result-{}", event.id, index));
                 let response_content = serde_json::to_string(&function_response.response)

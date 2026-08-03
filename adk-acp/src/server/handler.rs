@@ -1209,7 +1209,7 @@ mod tests {
         let image = ContentBlock::Image(ImageContent::new(encoded, "image/png"));
         let content = prompt_content(&[image]).expect("handler accepts image content");
         assert!(
-            matches!(&content.parts[0], adk_core::Part::InlineData { mime_type, data }
+            matches!(&content.parts[0], adk_core::Part::InlineData { mime_type, data, .. }
                 if mime_type == "image/png" && data == &raw),
             "image content must map to Part::InlineData"
         );
@@ -1221,7 +1221,7 @@ mod tests {
         let audio = ContentBlock::Audio(AudioContent::new(encoded_audio, "audio/mp3"));
         let content = prompt_content(&[audio]).expect("handler accepts audio content");
         assert!(
-            matches!(&content.parts[0], adk_core::Part::InlineData { mime_type, data }
+            matches!(&content.parts[0], adk_core::Part::InlineData { mime_type, data, .. }
                 if mime_type == "audio/mp3" && data == &raw_audio),
             "audio content must map to Part::InlineData"
         );

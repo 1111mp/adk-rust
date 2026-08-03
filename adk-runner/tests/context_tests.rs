@@ -493,6 +493,7 @@ fn conversation_history_preserves_tool_role() {
                 serde_json::json!({"success": true}),
             ),
             id: Some("call_1".into()),
+            annotations: None,
         }],
     });
     mutable.append_event(tool_event);
@@ -563,6 +564,7 @@ fn conversation_history_for_agent_filters_other_agents_events() {
                 serde_json::json!({"name": "Alice"}),
             ),
             id: Some("call_1".into()),
+            annotations: None,
         }],
     });
     mutable.append_event(coord_tool_resp);
@@ -629,6 +631,7 @@ fn conversation_history_for_agent_keeps_own_events() {
                 serde_json::json!({"jobs": []}),
             ),
             id: Some("call_2".into()),
+            annotations: None,
         }],
     });
     mutable.append_event(tool_resp);
@@ -669,6 +672,7 @@ fn conversation_history_for_agent_excludes_other_agents_function_responses() {
                 serde_json::json!({"data": "value"}),
             ),
             id: None,
+            annotations: None,
         }],
     });
     mutable.append_event(other_tool);
@@ -746,6 +750,7 @@ fn conversation_history_for_agent_double_transfer_sees_own_prior_events() {
                 serde_json::json!({"jobs": ["job_1", "job_2"]}),
             ),
             id: Some("call_s1".into()),
+            annotations: None,
         }],
     });
     mutable.append_event(sourcing_resp1);
@@ -785,6 +790,7 @@ fn conversation_history_for_agent_double_transfer_sees_own_prior_events() {
                 serde_json::json!({"ranked": ["job_1"]}),
             ),
             id: Some("call_c2".into()),
+            annotations: None,
         }],
     });
     mutable.append_event(coord_resp);

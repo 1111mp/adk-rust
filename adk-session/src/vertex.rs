@@ -2860,7 +2860,12 @@ fn content_to_vertex(content: &Content) -> Result<VertexContentPayload> {
             Part::Text { text } => {
                 VertexPartPayload { text: Some(text.clone()), ..VertexPartPayload::default() }
             }
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, uri, annotations } => {
+                if uri.is_some() || annotations.is_some() {
+                    return Err(VertexAiSessionService::invalid_input(format!(
+                        "ADK InlineData content part {index} has metadata that the Vertex AI GA v1 wire type cannot represent; the event must use rawEvent persistence",
+                    )));
+                }
                 if mime_type.trim().is_empty() {
                     return Err(VertexAiSessionService::invalid_input(format!(
                         "ADK InlineData content part {index} has an empty MIME type",
@@ -2876,7 +2881,12 @@ fn content_to_vertex(content: &Content) -> Result<VertexContentPayload> {
                     ..VertexPartPayload::default()
                 }
             }
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, annotations } => {
+                if annotations.is_some() {
+                    return Err(VertexAiSessionService::invalid_input(format!(
+                        "ADK FileData content part {index} has annotations that the Vertex AI GA v1 wire type cannot represent; the event must use rawEvent persistence",
+                    )));
+                }
                 if mime_type.trim().is_empty() || file_uri.trim().is_empty() {
                     return Err(VertexAiSessionService::invalid_input(format!(
                         "ADK FileData content part {index} requires a non-empty MIME type and URI",
@@ -2933,10 +2943,21 @@ fn content_to_vertex(content: &Content) -> Result<VertexContentPayload> {
                     ..VertexPartPayload::default()
                 }
             }
-            Part::FunctionResponse { function_response, id } => {
+            Part::FunctionResponse { function_response, id, annotations } => {
                 if id.is_some() {
                     return Err(VertexAiSessionService::invalid_input(format!(
                         "ADK FunctionResponse content part {index} has an id, but the Vertex AI GA v1 FunctionResponse wire type has no id field; the event must use rawEvent persistence",
+                    )));
+                }
+                if annotations.is_some()
+                    || function_response
+                        .inline_data
+                        .iter()
+                        .any(|part| part.uri.is_some() || part.annotations.is_some())
+                    || function_response.file_data.iter().any(|part| part.annotations.is_some())
+                {
+                    return Err(VertexAiSessionService::invalid_input(format!(
+                        "ADK FunctionResponse content part {index} has metadata that the Vertex AI GA v1 wire type cannot represent; the event must use rawEvent persistence",
                     )));
                 }
                 if function_response.name.trim().is_empty() {
@@ -3115,6 +3136,8 @@ fn content_from_vertex(content: VertexContentPayload) -> Result<Content> {
                     &inline_data.data,
                     &format!("content part {index} inlineData"),
                 )?,
+                uri: None,
+                annotations: None,
             }
         } else if let Some(file_data) = part.file_data {
             reject_extra_fields(index, "fileData", &file_data.extra)?;
@@ -3126,7 +3149,11 @@ fn content_from_vertex(content: VertexContentPayload) -> Result<Content> {
                     "vertex fileData content part {index} has an empty required MIME type or URI",
                 )));
             }
-            Part::FileData { mime_type: file_data.mime_type, file_uri: file_data.file_uri }
+            Part::FileData {
+                mime_type: file_data.mime_type,
+                file_uri: file_data.file_uri,
+                annotations: None,
+            }
         } else if let Some(function_call) = part.function_call {
             if video_metadata.is_some() {
                 return Err(VertexAiSessionService::session_error(format!(
@@ -3208,6 +3235,8 @@ fn content_from_vertex(content: VertexContentPayload) -> Result<Content> {
                                     "functionResponse part {index}.{response_index} inlineData"
                                 ),
                             )?,
+                            uri: None,
+                            annotations: None,
                         });
                     }
                     (None, Some(data)) => {
@@ -3220,6 +3249,7 @@ fn content_from_vertex(content: VertexContentPayload) -> Result<Content> {
                         file_data.push(FileDataPart {
                             mime_type: data.mime_type,
                             file_uri: data.file_uri,
+                            annotations: None,
                         });
                     }
                     _ => {
@@ -3238,6 +3268,7 @@ fn content_from_vertex(content: VertexContentPayload) -> Result<Content> {
                     file_data,
                 },
                 id: None,
+                annotations: None,
             }
         } else if let Some(executable_code) = part.executable_code {
             if video_metadata.is_some() {
@@ -3900,12 +3931,41 @@ fn validate_content_json_depth_with_trust(
                     trust,
                 )?;
             }
-            Part::FunctionResponse { function_response, .. } => {
+            Part::FunctionResponse { function_response, annotations, .. } => {
                 validate_lossless_json_depth_with_trust(
                     &function_response.response,
                     &format!("{part_path}.functionResponse.response"),
                     trust,
                 )?;
+                if let Some(annotations) = annotations {
+                    validate_lossless_json_depth_with_trust(
+                        annotations,
+                        &format!("{part_path}.functionResponse.annotations"),
+                        trust,
+                    )?;
+                }
+                for (media_index, media) in function_response.inline_data.iter().enumerate() {
+                    if let Some(annotations) = &media.annotations {
+                        validate_lossless_json_depth_with_trust(
+                            annotations,
+                            &format!(
+                                "{part_path}.functionResponse.inlineData[{media_index}].annotations"
+                            ),
+                            trust,
+                        )?;
+                    }
+                }
+                for (media_index, media) in function_response.file_data.iter().enumerate() {
+                    if let Some(annotations) = &media.annotations {
+                        validate_lossless_json_depth_with_trust(
+                            annotations,
+                            &format!(
+                                "{part_path}.functionResponse.fileData[{media_index}].annotations"
+                            ),
+                            trust,
+                        )?;
+                    }
+                }
             }
             Part::ServerToolCall { server_tool_call } => {
                 validate_lossless_json_depth_with_trust(
@@ -3921,11 +3981,16 @@ fn validate_content_json_depth_with_trust(
                     trust,
                 )?;
             }
-            Part::Thinking { .. }
-            | Part::Text { .. }
-            | Part::InlineData { .. }
-            | Part::FileData { .. }
-            | Part::EmbeddedResource { .. } => {}
+            Part::InlineData { annotations, .. } | Part::FileData { annotations, .. } => {
+                if let Some(annotations) = annotations {
+                    validate_lossless_json_depth_with_trust(
+                        annotations,
+                        &format!("{part_path}.annotations"),
+                        trust,
+                    )?;
+                }
+            }
+            Part::Thinking { .. } | Part::Text { .. } | Part::EmbeddedResource { .. } => {}
         }
     }
     Ok(())
@@ -4790,6 +4855,8 @@ mod tests {
             parts: vec![Part::InlineData {
                 mime_type: "application/octet-stream".to_string(),
                 data: vec![0; 256],
+                uri: None,
+                annotations: None,
             }],
         });
         let preflight = build_append_event_payload_with_limit(&event, 64)
@@ -5254,6 +5321,69 @@ mod tests {
     }
 
     #[test]
+    fn test_content_metadata_uses_lossless_raw_event_fallback() {
+        let annotations = serde_json::json!({"audience": ["user"], "priority": 0.8});
+        let parts = vec![
+            Part::InlineData {
+                mime_type: "image/png".to_string(),
+                data: vec![1, 2, 3],
+                uri: Some("file:///screenshots/result.png".to_string()),
+                annotations: Some(annotations.clone()),
+            },
+            Part::FileData {
+                mime_type: "application/pdf".to_string(),
+                file_uri: "gs://reports/result.pdf".to_string(),
+                annotations: Some(annotations.clone()),
+            },
+            Part::FunctionResponse {
+                function_response: FunctionResponseData::with_multimodal(
+                    "render_report",
+                    serde_json::json!({"ok": true}),
+                    vec![InlineDataPart {
+                        mime_type: "image/png".to_string(),
+                        data: vec![4, 5, 6],
+                        uri: Some("file:///screenshots/tool-result.png".to_string()),
+                        annotations: Some(annotations.clone()),
+                    }],
+                    vec![FileDataPart {
+                        mime_type: "application/pdf".to_string(),
+                        file_uri: "gs://reports/tool-result.pdf".to_string(),
+                        annotations: Some(annotations.clone()),
+                    }],
+                ),
+                id: None,
+                annotations: Some(annotations),
+            },
+        ];
+
+        for part in &parts {
+            let error = content_to_vertex(&Content {
+                role: "model".to_string(),
+                parts: vec![part.clone()],
+            })
+            .expect_err("metadata must not be dropped by canonical Vertex persistence");
+            assert!(error.message.contains("rawEvent persistence"));
+        }
+
+        let content = Content { role: "model".to_string(), parts };
+        let mut event = Event::new("inv-content-metadata");
+        event.author = "model".to_string();
+        event.llm_response.content = Some(content.clone());
+        let payload =
+            build_append_event_payload(&event).expect("metadata must use rawEvent persistence");
+        assert!(payload.get("content").is_none());
+        assert_eq!(payload["rawEvent"]["_adkRust"]["contentSource"], "raw");
+
+        let restored: Event =
+            serde_json::from_str(payload["rawEvent"]["_adkRust"]["adkEvent"].as_str().unwrap())
+                .expect("restore private event");
+        assert_eq!(
+            serde_json::to_value(restored.llm_response.content).unwrap(),
+            serde_json::to_value(Some(content)).unwrap(),
+        );
+    }
+
+    #[test]
     fn test_noncanonical_base64_thought_signatures_round_trip_raw() {
         for (event_id, part) in [
             (
@@ -5375,6 +5505,7 @@ mod tests {
                         serde_json::json!({ "ok": true }),
                     ),
                     id: Some("call-1".to_string()),
+                    annotations: None,
                 },
             ],
         };
@@ -5607,6 +5738,7 @@ mod tests {
             Part::FunctionResponse {
                 function_response: FunctionResponseData::new("tool", deep_value()),
                 id: None,
+                annotations: None,
             },
             Part::ServerToolCall { server_tool_call: deep_value() },
             Part::ServerToolResponse { server_tool_response: deep_value() },

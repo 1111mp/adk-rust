@@ -733,6 +733,7 @@ impl IntegratedRealtimeRunner {
         content.parts.push(adk_core::Part::FunctionResponse {
             function_response: adk_core::FunctionResponseData::new(&call.name, result.clone()),
             id: Some(call.call_id.clone()),
+            annotations: None,
         });
 
         if let Some(ref session_service) = self.session_service {
@@ -1400,7 +1401,7 @@ mod session_persistence_tests {
         );
 
         let has_function_response = content.parts.iter().any(|p| match p {
-            adk_core::Part::FunctionResponse { function_response, id } => {
+            adk_core::Part::FunctionResponse { function_response, id, .. } => {
                 id.as_deref() == Some("call-abc-123")
                     && function_response.response == short_circuit_value
             }

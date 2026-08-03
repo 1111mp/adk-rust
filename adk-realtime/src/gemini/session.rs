@@ -917,7 +917,7 @@ pub(crate) fn translate_client_message(
             adk_core::types::Part::Text { text } => {
                 gemini_parts.push(GeminiPart { text: Some(text), inline_data: None });
             }
-            adk_core::types::Part::InlineData { mime_type, data } => {
+            adk_core::types::Part::InlineData { mime_type, data, .. } => {
                 // Gemini natively encodes binary artifacts (images/audio) via a base64 payload envelope.
                 let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
                 gemini_parts.push(GeminiPart {
@@ -1053,7 +1053,7 @@ mod tests {
     fn test_gemini_translate_text_and_inline_data() {
         let parts = vec![
             Part::Text { text: "Look:".to_string() },
-            Part::InlineData { mime_type: "image/png".to_string(), data: vec![0x1, 0x2] },
+            Part::inline_data("image/png", vec![0x1, 0x2]),
         ];
         let msg = translate_client_message("user", parts);
 
@@ -1087,7 +1087,7 @@ mod tests {
     #[test]
     fn test_gemini_system_override_non_text_first() {
         let parts = vec![
-            Part::InlineData { mime_type: "image/png".to_string(), data: vec![0x1] },
+            Part::inline_data("image/png", vec![0x1]),
             Part::Text { text: "Analyze this".to_string() },
         ];
         let msg = translate_client_message("system", parts);
@@ -1106,7 +1106,7 @@ mod tests {
 
     #[test]
     fn test_gemini_system_override_no_text() {
-        let parts = vec![Part::InlineData { mime_type: "image/png".to_string(), data: vec![0x1] }];
+        let parts = vec![Part::inline_data("image/png", vec![0x1])];
         let msg = translate_client_message("system", parts);
 
         let content = msg.client_content.unwrap();
@@ -1125,6 +1125,7 @@ mod tests {
             Part::FileData {
                 mime_type: "image/jpeg".to_string(),
                 file_uri: "http://example.com/img".to_string(),
+                annotations: None,
             }, // Should be skipped
             Part::Thinking { thinking: "Hmm".to_string(), signature: None }, // Should be skipped
             Part::Text { text: "Last".to_string() },

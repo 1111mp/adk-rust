@@ -1359,7 +1359,7 @@ pub fn extract_code_block(text: &str) -> String {
 fn completion_for(content: &Content, tool: &str, call_id: u64) -> Option<Value> {
     let want_id = call_id.to_string();
     let by_id = content.parts.iter().find_map(|part| match part {
-        Part::FunctionResponse { function_response, id }
+        Part::FunctionResponse { function_response, id, .. }
             if function_response.name == tool && id.as_deref() == Some(want_id.as_str()) =>
         {
             Some(function_response.response.clone())
@@ -1370,7 +1370,7 @@ fn completion_for(content: &Content, tool: &str, call_id: u64) -> Option<Value> 
         return by_id;
     }
     content.parts.iter().find_map(|part| match part {
-        Part::FunctionResponse { function_response, id }
+        Part::FunctionResponse { function_response, id, .. }
             if function_response.name == tool && id.is_none() =>
         {
             Some(function_response.response.clone())
@@ -2931,6 +2931,7 @@ mod tests {
             parts: vec![Part::FunctionResponse {
                 function_response: adk_core::FunctionResponseData::new("slow", json!({"ok": true})),
                 id: None,
+                annotations: None,
             }],
         };
         let events = drive(
@@ -3073,6 +3074,7 @@ mod tests {
             parts: vec![Part::FunctionResponse {
                 function_response: FunctionResponseData::new("slow", json!({"ok": true})),
                 id: None,
+                annotations: None,
             }],
         };
         let ctx2 = Arc::new(MockInvocationContext::new(completion).with_state(state));

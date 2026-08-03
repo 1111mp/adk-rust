@@ -106,11 +106,11 @@ fn adk_content_to_chat_message(content: &Content) -> Result<OpenRouterChatMessag
             Part::Thinking { thinking, .. } => {
                 push_text_fragment(thinking, &mut text_fragments, &mut structured_parts)
             }
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 flush_text_fragments(&mut text_fragments, &mut structured_parts);
                 structured_parts.push(chat_part_from_inline_data(mime_type, data)?);
             }
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, .. } => {
                 flush_text_fragments(&mut text_fragments, &mut structured_parts);
                 structured_parts.push(chat_part_from_file_uri(mime_type, file_uri));
             }
@@ -179,7 +179,7 @@ fn adk_content_to_chat_message(content: &Content) -> Result<OpenRouterChatMessag
 }
 
 fn tool_response_chat_message(content: &Content) -> OpenRouterChatMessage {
-    if let Some(Part::FunctionResponse { function_response, id }) = content.parts.first() {
+    if let Some(Part::FunctionResponse { function_response, id, .. }) = content.parts.first() {
         return OpenRouterChatMessage {
             role: "tool".to_string(),
             tool_call_id: id.clone().or_else(|| Some(format!("call_{}", function_response.name))),
@@ -518,6 +518,7 @@ mod tests {
                     serde_json::json!({ "temperature": "22C" }),
                 ),
                 id: Some("call_weather".to_string()),
+                annotations: None,
             }],
         }])
         .expect("messages should convert");

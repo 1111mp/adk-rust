@@ -298,6 +298,7 @@ impl Event {
     ///             serde_json::json!({ "stdout": "ok\n", "exit_code": 0 }),
     ///         ),
     ///         id: Some("call_1".to_string()),
+    ///         annotations: None,
     ///     }],
     /// });
     ///
@@ -315,7 +316,7 @@ impl Event {
             .parts
             .iter()
             .filter_map(|part| match part {
-                crate::types::Part::FunctionResponse { function_response, id } => {
+                crate::types::Part::FunctionResponse { function_response, id, .. } => {
                     Some(ToolResultView {
                         call_id: id.as_deref(),
                         name: &function_response.name,
@@ -595,6 +596,7 @@ mod tests {
                     serde_json::json!({"temp": 72}),
                 ),
                 id: Some("call_123".to_string()),
+                annotations: None,
             }],
         });
         // Has function response -> NOT final (model needs to respond)
@@ -625,6 +627,7 @@ mod tests {
                     serde_json::json!({"result": "done"}),
                 ),
                 id: Some("call_tool".to_string()),
+                annotations: None,
             }],
         });
         // Even with function response, skip_summarization makes it final
@@ -717,6 +720,7 @@ mod tests {
                         serde_json::json!({"output": "42"}),
                     ),
                     id: Some("call_exec".to_string()),
+                    annotations: None,
                 },
             ],
         });
@@ -766,6 +770,7 @@ mod tests {
                         serde_json::json!({}),
                     ),
                     id: Some("call_1".to_string()),
+                    annotations: None,
                 },
                 Part::Text { text: "Done".to_string() },
             ],

@@ -674,12 +674,12 @@ impl StreamPrinter {
                 self.flush_pending_thinking();
                 self.print_tool_response(&function_response.name, &function_response.response);
             }
-            Part::InlineData { mime_type, data } => {
+            Part::InlineData { mime_type, data, .. } => {
                 self.flush_pending_thinking();
                 print!("\n[inline-data] mime={mime_type} bytes={}\n", data.len());
                 let _ = io::stdout().flush();
             }
-            Part::FileData { mime_type, file_uri } => {
+            Part::FileData { mime_type, file_uri, .. } => {
                 self.flush_pending_thinking();
                 print!("\n[file-data] mime={mime_type} uri={file_uri}\n");
                 let _ = io::stdout().flush();
@@ -962,16 +962,17 @@ mod tests {
                 serde_json::json!({"temp": 72}),
             ),
             id: None,
+            annotations: None,
         });
 
         // InlineData
-        printer
-            .handle_part(&Part::InlineData { mime_type: "image/png".into(), data: vec![0u8; 100] });
+        printer.handle_part(&Part::inline_data("image/png", vec![0u8; 100]));
 
         // FileData
         printer.handle_part(&Part::FileData {
             mime_type: "audio/wav".into(),
             file_uri: "gs://bucket/file.wav".into(),
+            annotations: None,
         });
 
         // No panics, no state corruption

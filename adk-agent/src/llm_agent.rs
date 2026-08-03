@@ -1724,6 +1724,7 @@ impl ToolExecutor<'_> {
                             serde_json::json!({ "error": e.to_string() }),
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 };
                 return ToolExecutionResult {
@@ -1762,6 +1763,7 @@ impl ToolExecutor<'_> {
                                 }),
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     run_after_tool_callbacks = false;
@@ -1777,6 +1779,7 @@ impl ToolExecutor<'_> {
                                 }),
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     run_after_tool_callbacks = false;
@@ -1816,6 +1819,7 @@ impl ToolExecutor<'_> {
                                 synthetic_result,
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     executed_tool = Some(tool_ref.clone());
@@ -1829,6 +1833,7 @@ impl ToolExecutor<'_> {
                                 serde_json::json!({ "error": e.to_string() }),
                             ),
                             id: id.clone(),
+                            annotations: None,
                         }],
                     });
                     run_after_tool_callbacks = false;
@@ -1858,6 +1863,7 @@ impl ToolExecutor<'_> {
                                     serde_json::json!({ "error": e.to_string() }),
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         });
                         run_after_tool_callbacks = false;
@@ -1886,6 +1892,7 @@ impl ToolExecutor<'_> {
                             serde_json::json!({ "error": msg }),
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 });
                 run_after_tool_callbacks = false;
@@ -2055,6 +2062,7 @@ impl ToolExecutor<'_> {
                             final_function_response,
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 });
             } else {
@@ -2068,6 +2076,7 @@ impl ToolExecutor<'_> {
                             }),
                         ),
                         id: id.clone(),
+                        annotations: None,
                     }],
                 });
             }
@@ -2101,6 +2110,7 @@ impl ToolExecutor<'_> {
                                     serde_json::json!({ "error": e.to_string() }),
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         };
                         break;
@@ -2126,6 +2136,7 @@ impl ToolExecutor<'_> {
                                         modified_value,
                                     ),
                                     id: id.clone(),
+                                    annotations: None,
                                 }],
                             };
                             break;
@@ -2140,6 +2151,7 @@ impl ToolExecutor<'_> {
                                         serde_json::json!({ "error": e.to_string() }),
                                     ),
                                     id: id.clone(),
+                                    annotations: None,
                                 }],
                             };
                             break;
@@ -2185,6 +2197,7 @@ impl ToolExecutor<'_> {
                                     modified_result,
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         };
                     }
@@ -2197,6 +2210,7 @@ impl ToolExecutor<'_> {
                                     serde_json::json!({ "error": e.to_string() }),
                                 ),
                                 id: id.clone(),
+                                annotations: None,
                             }],
                         };
                     }
@@ -2898,6 +2912,7 @@ impl Agent for LlmAgent {
                                             }),
                                         ),
                                         id: call.id.clone(),
+                                        annotations: None,
                                     }],
                                 };
                                 conversation_history.push(error_content.clone());
