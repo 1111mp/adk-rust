@@ -12,7 +12,7 @@
 >
 > **Release transition:** This banner changes to “Released” only after all 41 v2.0.0 crates are available on crates.io. The roadmap marker then changes from “release candidate” to “current.”
 >
-> **Contributors:** Many thanks to [@mikefaille](https://github.com/mikefaille) — AdkIdentity design, realtime audio, LiveKit bridge, skill system. [@rohan-panickar](https://github.com/rohan-panickar) — OpenAI-compatible providers, xAI, multimodal content. [@dhruv-pant](https://github.com/dhruv-pant) — Gemini service account auth. [@tomtom215](https://github.com/tomtom215) — A2A Protocol v1.0.0 types crate ([a2a-protocol-types](https://crates.io/crates/a2a-protocol-types)), Foundation-verified wire types powering our A2A v1 layer. [@danielsan](https://github.com/danielsan) — Google deps issue & PR (#181, #203), RAG crash report (#205). [@CodingFlow](https://github.com/CodingFlow) — Gemini 3 thinking level, global endpoint, citationSources (#177, #178, #179). [@ctylx](https://github.com/ctylx) — skill discovery fix (#204). [@poborin](https://github.com/poborin) — project config proposal (#176). [@chillin-capybara](https://github.com/chillin-capybara) — ACP integration, adk-acp crate. [@baotao2006](https://github.com/baotao2006) — UTF-8 boundary audit, CJK search/skill/eval fixes (#349, #357). [Get started →](https://github.com/zavora-ai/adk-rust/wiki/quickstart)
+> **v2.0.0 contributors:** Many thanks to [@joseph-wortmann](https://github.com/joseph-wortmann) — the Code Agents proposal (#380) and the `CodeActAgent` with its Monty-backed Python runtime (#399, #525). [@mikefaille](https://github.com/mikefaille) — realtime audio and LiveKit: typed audio preserved through the bridge (#431, #432), workspace-wide LiveKit/webrtc alignment (#433), the 0.8.1 upgrade (#543), disconnect reasons on a closed stream (#540), key-order-independent `SchemaCache` keys (#531), a unified workspace `jsonschema` (#533). [@caibirdme](https://github.com/caibirdme) — split the `LlmAgent` run flow into a reusable `ToolExecutor` (#522). [@NikiKrutan](https://github.com/NikiKrutan) — `reasoning` fallback for OpenAI-compatible providers (#388), duplicate `provider_metadata` key in `Event` serialization (#415). [@mscharley](https://github.com/mscharley) — Anthropic `web_fetch_20250910` tool type and result blocks (#381). [@hiratara](https://github.com/hiratara) — `functionDeclarations` field names for Gemini 3 compatibility (#389). [@chathaway-codes](https://github.com/chathaway-codes) — configurable parallel tool calls for OpenAI (#387). [@nullsauce](https://github.com/nullsauce) — parallel tool-call indices in the OpenRouter adapter (#410). [@morlay](https://github.com/morlay) — streaming content accumulation in the DeepSeek final event (#398). And to everyone who filed an issue or a reproduction this cycle. [Get started →](https://github.com/zavora-ai/adk-rust/wiki/quickstart)
 >
 > **Announcements:** ADK-Rust Roadmap launched for 2026, we welcome suggestions, comments and ideas. ADK Playground launched! You can now run 70+ ADK-Rust AI Agents online for free. Compile and click. No login, no install. https://playground.adk-rust.com And many more discussions, feel free to discuss: [![GitHub Discussions](https://img.shields.io/github/discussions/zavora-ai/adk-rust?style=flat&logo=github&color=5865F2)](https://github.com/zavora-ai/adk-rust/discussions)
 
@@ -1024,6 +1024,10 @@ The workspace keeps core crate examples close to the crates that own them, and s
 
 Validated examples in this repo include:
 
+- `cargo run --manifest-path examples/coding_agent/Cargo.toml` — the `CodingAgent` writing and running real code; append `-- tour` for the increasing-complexity scenarios or `-- multiturn` for an incremental build.
+- `cargo run --manifest-path examples/coding_goal/Cargo.toml` — autonomous goal mode: plan → act → verify against a success command, with a resumable checkpoint.
+- `cargo run --manifest-path examples/coding_graph/Cargo.toml` — an `adk-graph` review workflow: parallel reviewers fanning in to a single aggregator.
+- `cargo run --manifest-path examples/harness_pattern/Cargo.toml` — the agent-harness pattern over `adk-devtools`.
 - `cargo run -p adk-rust --example performance_0_8_llm_agents --features openrouter` — all 12 v0.8 optimization use cases with live LLM agents.
 - `cargo run --manifest-path examples/tier_examples/standard/Cargo.toml --bin 11-standard-graph` — standard-tier graph workflow.
 - `cargo run --manifest-path examples/openai_responses/Cargo.toml` — OpenAI Responses API example.
@@ -1137,15 +1141,28 @@ Apache 2.0 (same as Google's ADK)
 
 ## Contributing
 
-Contributions welcome! Please open an issue or pull request on GitHub.
+Contributions welcome — open an issue or a pull request. [CONTRIBUTING.md](CONTRIBUTING.md) covers the workflow, and [AGENTS.md](AGENTS.md) documents the repo conventions the CI gates enforce (formatting, `clippy -D warnings`, nextest, release consistency).
+
+The v2.0.0 contributors are credited at the top of this README. Earlier cycles:
+
+<details>
+<summary>v1.0.0 contributors</summary>
+
+[@mikefaille](https://github.com/mikefaille) — AdkIdentity design, realtime audio, LiveKit bridge, skill system. [@rohan-panickar](https://github.com/rohan-panickar) — OpenAI-compatible providers, xAI, multimodal content. [@dhruv-pant](https://github.com/dhruv-pant) — Gemini service account auth. [@tomtom215](https://github.com/tomtom215) — A2A Protocol v1.0.0 types crate ([a2a-protocol-types](https://crates.io/crates/a2a-protocol-types)), Foundation-verified wire types powering our A2A v1 layer. [@danielsan](https://github.com/danielsan) — Google deps issue & PR (#181, #203), RAG crash report (#205). [@CodingFlow](https://github.com/CodingFlow) — Gemini 3 thinking level, global endpoint, citationSources (#177, #178, #179). [@ctylx](https://github.com/ctylx) — skill discovery fix (#204). [@poborin](https://github.com/poborin) — project config proposal (#176). [@chillin-capybara](https://github.com/chillin-capybara) — ACP integration, adk-acp crate. [@baotao2006](https://github.com/baotao2006) — UTF-8 boundary audit, CJK search/skill/eval fixes (#349, #357).
+
+</details>
 
 ## Roadmap
 
-**v2.0.0** (release candidate) — production agent framework:
-- **Composable Template System** — 12 templates, 9 add-ons, 5 enterprise patterns via `cargo adk new --addon`.
-- **Cargo Adk Build** — compile-without-deploy subcommand for pre-deployment verification.
-- **A2A Simple Scaffolding** — `A2aServer::quick_start`, `A2aServer::builder`, and `cargo adk new --template a2a-server`.
-- **Security** — hickory-proto 0.26.1, openssl 0.10.80, rubato 3.0, similar 3.
+**v2.0.0** (release candidate) — production agent framework. See the [CHANGELOG](CHANGELOG.md) for the full entry and the [migration guide](docs/official_docs/migration/1.0-to-2.0.md) for breaking changes:
+- **Coding agents** — `adk-devtools` (`read_file`/`write_file`/`edit_file`/`glob`/`grep`/`bash` over a sandboxed `Workspace`), the `CodingAgent` harness, and native `code` / `goal` / `ultracode` CLI commands — `goal` loops plan → act → verify and is durable and resumable.
+- **CodeAct** — `CodeAgent` (`codeact` feature) writes Python instead of emitting tool calls, over a pluggable `CodeRuntime` seam; the Monty-backed Python runtime ships in-repo as `adk-codeact-monty`.
+- **Governed computer use** — `adk-computer-use`: a deterministic graph over `computer-use-mcp` with digest-bound approval interrupts, single-executor mutation, and tamper-evident receipts.
+- **Official protocol SDKs** — MCP on `rmcp 2.2` (protocol `2025-11-25`) with dynamic server management; ACP on `agent-client-protocol` 1.2 with exact capability publication.
+- **Live tool authorization** — async tool confirmation keyed by function-call ID, resolved while the run is in flight.
+- **Composable template system** — 12 templates, 9 add-ons, 5 enterprise patterns via `cargo adk new --addon`, plus `cargo adk build` for compile-without-deploy verification.
+- **A2A simple scaffolding** — `A2aServer::quick_start`, `A2aServer::builder`, and `cargo adk new --template a2a-server`.
+- **Security** — a full hardening pass across the sandbox, server, auth, realtime, and computer-use boundaries; hickory-proto 0.26.1, openssl 0.10.80, rubato 3.0, similar 3.
 
 <details>
 <summary>v0.8.0 and earlier</summary>
