@@ -36,8 +36,22 @@ base64 = { version = "0.22", optional = true }
 rubato = { version = "4.0", optional = true }
 dasp = { version = "0.11", features = ["signal"], optional = true }
 
-# VAD (optional)
-webrtc-vad = { version = "0.4", optional = true }
+# VAD
+#
+# There is deliberately no VAD backend dependency here. `webrtc-vad` used to be
+# declared under the `vad` feature but was never imported by a single line of
+# this crate, so it only ever cost consumers a C toolchain and a linker hazard:
+# it builds libfvad, which exports the upstream WebRTC signal-processing symbols
+# (`WebRtcSpl_*`) unmangled. Any binary that also links LiveKit's `webrtc-sys`
+# gets the same symbols from the full libwebrtc and fails to link outright:
+#
+#     wild: error: Duplicate symbols detected: WebRtcSpl_DivW32W16,
+#       defined in libwebrtc_vad-*.rlib @ ...-division_operations.o
+#       and         libwebrtc_sys-*.rlib @ division_operations.o
+#
+# A real backend lands here once `wavekat-vad` gains its pure-Rust `earshot`
+# backend; it must be pinned to an immutable revision and must not re-introduce
+# a C VAD into the dependency graph.
 
 # Local inference (optional)
 ort = { version = "2.0.0-rc.11", optional = true }
@@ -76,7 +90,11 @@ tts = ["dep:reqwest", "dep:base64"]
 stt = ["dep:reqwest", "dep:tokio-tungstenite"]
 music = ["dep:reqwest"]
 fx = ["dep:rubato", "dep:dasp"]
-vad = ["dep:webrtc-vad"]
+# The `VadProcessor` trait is compiled unconditionally, so this feature has
+# never gated any code (`#[cfg(feature = "vad")]` appears nowhere in the crate).
+# It is retained as a no-op so existing consumers and `desktop-audio` keep
+# building; it no longer drags a C VAD implementation into the graph.
+vad = []
 streaming = []
 
 # Desktop audio I/O (cpal-based, not included in `all` — requires audio hardware)
