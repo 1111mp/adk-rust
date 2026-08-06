@@ -167,4 +167,4 @@ pub use pricing::{CostBreakdown, GeminiPricing, estimate_cost, estimate_cost_lon
 // ========== Schema Adapter ==========
 // Provider-specific schema normalization for Gemini function-calling API
 
-pub use schema_adapter::GeminiSchemaAdapter;
+pub use schema_adapter::{GeminiSchemaAdapter, GeminiSchemaDialect};

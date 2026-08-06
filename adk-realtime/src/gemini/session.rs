@@ -212,6 +212,13 @@ pub struct GeminiRealtimeSession {
     /// close and a dead socket as the same `None`, so a polling caller cannot
     /// tell an aborted session from a broken one without it.
     last_disconnect: Arc<ParkingMutex<Option<crate::session::DisconnectReason>>>,
+    /// Which function-declaration field tool schemas are posted under.
+    ///
+    /// Held on the session because the setup frame is built from `&self`, and
+    /// because it must match the dialect the caller reduced its schemas to —
+    /// posting a schema that kept `additionalProperties` under the legacy
+    /// `parameters` field closes the socket with WS 1007.
+    schema_dialect: adk_gemini::GeminiSchemaDialect,
 }
 
 impl GeminiRealtimeSession {
@@ -227,6 +234,24 @@ impl GeminiRealtimeSession {
         backend: GeminiLiveBackend,
         model: &str,
         config: RealtimeConfig,
+    ) -> Result<Self> {
+        Self::connect_with_dialect(backend, model, config, Default::default()).await
+    }
+
+    /// Connect, declaring which schema dialect the caller reduced its tool
+    /// schemas to.
+    ///
+    /// Use this when tool schemas were produced by
+    /// [`GeminiSchemaAdapter::json_schema()`](adk_gemini::GeminiSchemaAdapter::json_schema):
+    /// their constraints survive only if they are posted under
+    /// `parametersJsonSchema`, and this is what selects that field.
+    /// [`connect`](Self::connect) keeps the legacy `parameters` field, so
+    /// existing callers are unaffected.
+    pub async fn connect_with_dialect(
+        backend: GeminiLiveBackend,
+        model: &str,
+        config: RealtimeConfig,
+        schema_dialect: adk_gemini::GeminiSchemaDialect,
     ) -> Result<Self> {
         let ws_stream = match &backend {
             GeminiLiveBackend::Studio { api_key } => {
@@ -335,6 +360,7 @@ impl GeminiRealtimeSession {
             audio_buffer: Arc::new(ParkingMutex::new(BytesMut::new())),
             last_disconnect: Arc::new(ParkingMutex::new(None)),
             event_queue: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            schema_dialect,
         };
 
         session.send_setup(model, config).await?;
@@ -397,7 +423,7 @@ impl GeminiRealtimeSession {
             parts: vec![GeminiPart { text: Some(text), inline_data: None }],
         });
 
-        let tools = convert_tools(config.tools);
+        let tools = convert_tools(config.tools, self.schema_dialect);
 
         // Functionally extract the token if it exists in the prior state map
         let handle = config
@@ -1042,7 +1068,19 @@ pub(crate) fn translate_client_message(
 }
 
 /// Convert ADK tool definitions to Gemini format.
-fn convert_tools(tools: Option<Vec<ToolDefinition>>) -> Option<Vec<Value>> {
+///
+/// `dialect` decides the field the schema is posted under. It is a parameter
+/// rather than a constant because Gemini's two schema fields are mutually
+/// exclusive and express different things: `parameters` takes an OpenAPI
+/// subset, `parametersJsonSchema` takes standard JSON Schema. Hardcoding the
+/// legacy field silently discards every constraint the subset cannot carry —
+/// `additionalProperties`, `allOf`, `if`/`then`, `minLength`, the numeric
+/// bounds — leaving the model to guess at rules the caller still enforces.
+fn convert_tools(
+    tools: Option<Vec<ToolDefinition>>,
+    dialect: adk_gemini::GeminiSchemaDialect,
+) -> Option<Vec<Value>> {
+    let field = dialect.parameters_field();
     tools.map(|tools| {
         vec![json!({
             "functionDeclarations": tools.iter().map(|t| {
@@ -1051,7 +1089,7 @@ fn convert_tools(tools: Option<Vec<ToolDefinition>>) -> Option<Vec<Value>> {
                     decl["description"] = json!(desc);
                 }
                 if let Some(params) = &t.parameters {
-                    decl["parameters"] = params.clone();
+                    decl[field] = params.clone();
                 }
                 decl
             }).collect::<Vec<_>>()
@@ -1206,5 +1244,47 @@ mod tests {
     fn test_flush_threshold_bytes_pcm16_16khz_40ms() {
         let threshold = GeminiRealtimeSession::flush_threshold_bytes(&AudioFormat::pcm16_16khz());
         assert_eq!(threshold, 1280);
+    }
+
+    fn tool_with_constrained_schema() -> Vec<ToolDefinition> {
+        vec![ToolDefinition {
+            name: "submit".to_string(),
+            description: Some("a tool".to_string()),
+            parameters: Some(json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {"n": {"type": "string", "minLength": 7}}
+            })),
+        }]
+    }
+
+    /// The default stays on the legacy field, so nothing changes for callers
+    /// who do not opt in.
+    #[test]
+    fn tools_default_to_the_legacy_parameters_field() {
+        let tools =
+            convert_tools(Some(tool_with_constrained_schema()), Default::default()).unwrap();
+        let decl = &tools[0]["functionDeclarations"][0];
+
+        assert!(decl.get("parameters").is_some(), "{decl}");
+        assert!(decl.get("parametersJsonSchema").is_none(), "{decl}");
+    }
+
+    /// The bug this exists to fix: a schema that kept `additionalProperties`
+    /// must not be posted under `parameters`. Gemini answers that frame by
+    /// closing the socket with WS 1007, so the call dies before any audio
+    /// flows — the two fields are mutually exclusive, never interchangeable.
+    #[test]
+    fn json_schema_dialect_posts_under_parameters_json_schema() {
+        let tools = convert_tools(
+            Some(tool_with_constrained_schema()),
+            adk_gemini::GeminiSchemaDialect::JsonSchema,
+        )
+        .unwrap();
+        let decl = &tools[0]["functionDeclarations"][0];
+
+        assert!(decl.get("parameters").is_none(), "both fields sent: {decl}");
+        assert_eq!(decl["parametersJsonSchema"]["additionalProperties"], json!(false));
+        assert_eq!(decl["parametersJsonSchema"]["properties"]["n"]["minLength"], 7);
     }
 }
