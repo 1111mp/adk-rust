@@ -45,7 +45,10 @@ mod model;
 mod session;
 
 pub use model::GeminiRealtimeModel;
-pub use session::{GeminiLiveBackend, GeminiRealtimeSession};
+pub use session::{
+    ActivityDetection, ActivitySignalOutcome, ActivitySignaller, GeminiLiveBackend,
+    GeminiRealtimeSession,
+};
 
 #[cfg(feature = "vertex-live")]
 pub use session::build_vertex_live_url;

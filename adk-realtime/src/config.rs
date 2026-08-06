@@ -46,6 +46,15 @@ pub enum VadMode {
     /// Semantic VAD (OpenAI-specific).
     SemanticVad,
     /// No automatic VAD - manual turn management.
+    ///
+    /// **The application becomes responsible for turn detection.** On Gemini
+    /// Live this sends
+    /// `setup.realtimeInputConfig.automaticActivityDetection.disabled = true`,
+    /// after which the server performs no turn detection at all and the client
+    /// must send `activityStart` / `activityEnd` itself, via the
+    /// `ActivitySignaller` that a Gemini session offers only in this mode.
+    /// Selecting this and never signalling leaves a session that never takes
+    /// a turn.
     None,
 }
 
@@ -340,7 +349,11 @@ impl RealtimeConfig {
         self.with_vad(VadConfig::server_vad())
     }
 
-    /// Disable VAD (manual turn management).
+    /// Disable automatic VAD, taking ownership of turn detection.
+    ///
+    /// See [`VadMode::None`] — on Gemini Live this is also what unlocks client
+    /// `activityStart` / `activityEnd` signalling, which the protocol permits
+    /// only while server-side detection is disabled.
     pub fn without_vad(mut self) -> Self {
         self.turn_detection = Some(VadConfig::disabled());
         self
