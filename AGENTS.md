@@ -291,9 +291,9 @@ adk-rust-macros/ Procedural macros (#[tool] attribute with read_only, concurrenc
                  long_running metadata)
 adk-code/        Code execution (experimental)
 adk-codeact-monty/ Python CodeRuntime for the CodeActAgent, backed by the Pydantic Monty
-                 interpreter (monty, monty-types, monty-fs from crates.io). Sandboxed
-                 OS access (mounts, environ, clock), suspend/resume snapshots.
-                 Workspace member; publish = false.
+                 interpreter (via adk-code's embedded-python kernel, which pins the
+                 monty crates once). Sandboxed OS access (mounts, environ, clock),
+                 suspend/resume snapshots. EXPERIMENTAL.
 adk-devtools/    Developer tools for coding agents — inner-loop file/search/edit tools
                  (read_file, write_file, edit_file, glob, grep, ...) scoped to a sandboxed workspace
 adk-bench/       Benchmarking framework: framework-level runtime performance with real LLM APIs
@@ -406,7 +406,7 @@ Four tiered presets control which crates are compiled:
 - `minimal` **(default)** — agents, models, gemini, runner, sessions. Fastest possible build for a single Gemini-powered agent.
 - `standard` — minimal + openai, anthropic, tools, memory, telemetry, skills, graph, auth, server, eval, guardrail, plugin, artifacts. Production deployment with server and auth.
 - `enterprise` — standard + realtime, browser, rag, payments, awp. Full-featured production.
-- `full` — enterprise + audio, code, sandbox. Everything.
+- `full` — enterprise + audio, code, sandbox, code-tools. Everything.
 
 Domain add-ons are composable with any tier: `features = ["minimal", "audio"]`.
 
@@ -421,6 +421,12 @@ Specialist opt-in features:
 - `yaml-agent`, `agent-registry` — YAML agent config and registry REST API
 - `gemini-interactions` — Gemini Interactions API (Beta): wire client surface (server-side history, step timeline) plus the runtime transport on `GeminiModel` (`use_interactions_api`) driving the standard `LlmAgent`/`Runner`
 - `mcp`, `mcp-http`, `mcp-sampling` — MCP transport and sampling support
+- `code-tools` — Code execution tools over the adk-code substrate (`CodeTool`, `PythonCodeTool`, `JavaScriptCodeTool`, `MontyPythonCodeTool`; forwarded to adk-tool; included in `full`)
+- `code-embedded-js` — Embedded JavaScript execution via boa_engine — the `JavaScriptCodeTool` live path (forwarded to adk-tool and adk-code)
+- `code-embedded-python` — In-process Python execution via the Monty interpreter (`MontyPythonCodeTool`, forwarded to adk-tool and adk-code)
+- `code-docker` — Docker SDK-based persistent container execution (forwarded to adk-tool and adk-code)
+- `codeact` — CodeAct agents: the model acts by writing code (forwarded to adk-agent)
+- `codeact-monty` — Python `CodeRuntime` for the CodeActAgent via the Monty interpreter (adk-codeact-monty; implies `codeact`)
 - `slack`, `bigquery`, `spanner` — Native toolsets
 - `action`, `action-http`, `action-trigger`, `action-db`, `action-code`, `action-email`, `action-rss`, `action-full` — Action node executors
 - `video-avatar` — HeyGen/D-ID avatar providers
@@ -782,7 +788,7 @@ Always verify builds during publish — never use `--no-verify`. Verification en
 Crates must be published in dependency order. `cargo xtask publish` (via
 `./publish.sh`) computes the order from the workspace graph, so this list is
 documentation rather than configuration — `scripts/check-publish-order.sh` is the
-gate that keeps it satisfiable. The current 8 tiers over 41 publishable crates:
+gate that keeps it satisfiable. The current 8 tiers over 42 publishable crates:
 
 ```
 Tier 1: adk-core, adk-anthropic, adk-deploy, adk-enterprise, adk-rust-macros,
@@ -793,7 +799,7 @@ Tier 2: adk-action, adk-artifact, adk-awp, adk-browser, adk-devtools, adk-gemini
 Tier 3: adk-code, adk-graph, adk-model, adk-rag, adk-realtime, adk-retry-reflect,
         adk-skill
 Tier 4: adk-agent, adk-audio, adk-runner, adk-tool
-Tier 5: adk-acp, adk-eval, adk-managed, adk-server
+Tier 5: adk-acp, adk-codeact-monty, adk-eval, adk-managed, adk-server
 Tier 6: adk-auth, adk-bench, adk-cli
 Tier 7: adk-computer-use, adk-payments, cargo-adk
 Tier 8: adk-rust (umbrella — always last)

@@ -526,8 +526,10 @@ dependencies = [
 name = "adk-tool"
 version = "2.0.0"
 dependencies = [
+ "adk-code",
  "adk-core",
  "adk-rust-macros",
+ "adk-sandbox",
  "adk-telemetry",
  "async-trait",
  "base64",

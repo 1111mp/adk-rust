@@ -39,7 +39,7 @@
 //! # stdout
 //!
 //! Monty captures `print()` output per step (via [`PrintWriter::collect_string`],
-//! capped at [`DEFAULT_MAX_PRINT_COLLECT_BYTES`](monty_types::DEFAULT_MAX_PRINT_COLLECT_BYTES)
+//! capped at [`DEFAULT_MAX_PRINT_COLLECT_BYTES`](adk_code::embedded_python::monty_types::DEFAULT_MAX_PRINT_COLLECT_BYTES)
 //! — exceeding it raises `MemoryError` in the script), which is attached to each
 //! [`RunStep`] so the agent can surface it back to the model.
 
@@ -49,15 +49,15 @@ use std::time::Duration;
 use adk_agent::codeact::{
     CodeRuntime, PendingCall, ResumeWith, RunStep, RuntimeCapabilities, RuntimeError,
 };
-use adk_core::Tool;
-use monty::{FunctionCall, MontyRun, RunProgress};
-use monty_types::{
+use adk_code::embedded_python::monty::{FunctionCall, MontyRun, RunProgress};
+use adk_code::embedded_python::monty_types::{
     CompileOptions, ExcType, ExtFunctionResult, LimitedTracker, MontyException, MontyObject,
     NameLookupResult, PrintWriter, ResourceLimits,
 };
+use adk_code::embedded_python::{json_to_monty, monty_to_json};
+use adk_core::Tool;
 use serde_json::Value;
 
-use crate::convert::{json_to_monty, monty_to_json};
 use crate::os_access::{OsAccess, OsAccessBuilder, PathAccess};
 use crate::prompt::{MONTY_PROMPT, TOOL_DISPATCH_FN, tool_entry};
 
@@ -374,7 +374,8 @@ impl CodeRuntime for MontyRuntime {
 ///
 /// OS calls (filesystem, environment, clock) are serviced in-place against the
 /// [`OsAccess`] policy and resumed immediately — they are never tools and never
-/// pause the agent loop. A fresh [`MountTable`](monty_fs::MountTable) is built
+/// pause the agent loop. A fresh
+/// [`MountTable`](adk_code::embedded_python::monty_fs::MountTable) is built
 /// once per drive so concurrent runs of the same runtime never share mount
 /// state.
 fn drive(

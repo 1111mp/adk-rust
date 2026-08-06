@@ -342,7 +342,11 @@ dependencies = [
  "async-trait",
  "boa_engine",
  "bollard",
+ "chrono",
  "futures",
+ "monty",
+ "monty-fs",
+ "monty-types",
  "proptest",
  "rand 0.9.4",
  "serde",
@@ -355,15 +359,12 @@ dependencies = [
 
 [[package]]
 name = "adk-codeact-monty"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "adk-agent",
+ "adk-code",
  "adk-core",
  "async-trait",
- "chrono",
- "monty",
- "monty-fs",
- "monty-types",
  "serde_json",
  "tempfile",
 ]
@@ -842,6 +843,7 @@ dependencies = [
  "adk-browser",
  "adk-cli",
  "adk-code",
+ "adk-codeact-monty",
  "adk-computer-use",
  "adk-core",
  "adk-enterprise",

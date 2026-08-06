@@ -16,6 +16,7 @@ The crate provides:
 - Sandbox policy model (`SandboxPolicy`, `BackendCapabilities`) with fail-closed validation
 - Rust-first code execution via `RustExecutor` (check → build → delegate) and legacy `RustSandboxExecutor`
 - Embedded JavaScript execution via `EmbeddedJsExecutor` (boa_engine, `embedded-js` feature)
+- Embedded Python execution via `MontyOneShotExecutor` / `MontyReplExecutor` (Pydantic Monty, `embedded-python` feature)
 - WASM guest module execution via `WasmGuestExecutor` (phase 1 placeholder)
 - Docker container execution via `DockerExecutor` (persistent, `docker` feature) and `ContainerCommandExecutor` (ephemeral, always available)
 - `CodeTool` implementing `adk_core::Tool` for LLM agent integration
@@ -68,6 +69,7 @@ User code must provide `fn run(input: serde_json::Value) -> serde_json::Value`. 
 |---------------|------------------------------------------|---------|
 | (none)        | Core types, `RustExecutor`, `RustSandboxExecutor`, `ContainerCommandExecutor`, `WasmGuestExecutor`, `CodeTool`, `Workspace` | ✅ |
 | `embedded-js` | `EmbeddedJsExecutor` via `boa_engine`    | ❌      |
+| `embedded-python` | `MontyOneShotExecutor` / `MontyReplExecutor` via the Monty interpreter | ❌ |
 | `docker`      | `DockerExecutor` via `bollard` (persistent Docker containers) | ❌ |
 
 ## Execution Backends
@@ -79,6 +81,8 @@ User code must provide `fn run(input: serde_json::Value) -> serde_json::Value`. 
 | `RustSandboxExecutor` | HostLocal | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `RustExecutor` | Delegated | ✅ | Delegated | Delegated | Delegated | ❌ |
 | `EmbeddedJsExecutor` | InProcess | ✅ | ✅* | ✅* | ✅* | ❌ |
+| `MontyOneShotExecutor` | InProcess | ✅ | ✅* | ✅ | ✅ | ❌ |
+| `MontyReplExecutor` | InProcess | ✅ | ✅* | ✅ | ✅ | ✅ |
 | `WasmGuestExecutor` | InProcess | ✅ | ✅* | ✅* | ✅* | ❌ |
 | `ContainerCommandExecutor` | ContainerEphemeral | ✅ | ✅ | ✅ | ✅ | ❌ |
 | `DockerExecutor` | ContainerPersistent | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -145,6 +149,33 @@ let request = ExecutionRequest {
 ```
 
 User code is wrapped in an IIFE so `return` works. Input is injected as a global `input` variable. Return value is converted to JSON.
+
+### Monty executors (`embedded-python` feature)
+
+In-process Python execution via the [Pydantic Monty](https://github.com/pydantic/monty) interpreter — no container, no subprocess, microsecond startup. One builder produces two products: `build_one_shot()` runs each call in a fresh interpreter, `build_repl()` persists interpreter state (variables, functions, imports) across calls.
+
+Every OS call Monty can emit (filesystem, `os.getenv`/`os.environ`, `datetime.now()`/`date.today()`) is serviced against grants the host authors at construction; ungranted access raises a catchable in-script `OSError`. Monty has no network or subprocess surface at all. Registered host functions become callable Python functions, and both executors describe their built environment through `CodeExecutor::prompt_snippet()`.
+
+```rust
+use adk_code::{MontyExecutorBuilder, PathAccess};
+use serde_json::json;
+
+let builder = MontyExecutorBuilder::new()
+    .allow_path("/data", "/srv/agent/data", PathAccess::ReadOnly)
+    .allow_path("/out", "/srv/agent/out", PathAccess::ReadWrite)
+    .environ_var("PROJECT", "acme")
+    .system_clock()
+    .function_fn("row_count", "Count rows in the loaded dataset.", |args, _kwargs| async move {
+        Ok(json!(args.len()))
+    });
+
+let one_shot = builder.clone().build_one_shot()?;   // fresh interpreter per call
+let repl = builder.build_repl()?;                   // state persists across calls
+```
+
+The per-request `SandboxPolicy` may only narrow within the builder's grants; a request exceeding them is rejected fail-closed before any code runs. The value of the script's final expression becomes `ExecutionResult::output`; `print()` output is captured as stdout.
+
+The `embedded_python` module is also the workspace's shared Monty integration kernel: it exposes the JSON↔Monty conversion (`json_to_monty` / `monty_to_json`), the OS-call servicing function (`resolve_os_call`), `PathAccess`, and re-exports of the `monty` / `monty-types` / `monty-fs` crates — so the Monty release is pinned exactly once, here. `adk-codeact-monty` builds its `CodeRuntime` on this kernel.
 
 ### WasmGuestExecutor
 

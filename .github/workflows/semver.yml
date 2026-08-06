@@ -57,10 +57,11 @@ jobs:
     # Every other published crate. Warn-only because these tiers do not carry the
     # Stable API commitment (see STABILITY.md).
     #
-    # Absent on purpose: `adk-computer-use` and `adk-devtools` are new in 2.0.0 and
-    # have no published baseline to diff against, and `adk-rust-macros` exposes no
-    # library target for cargo-semver-checks to read. Add the first two here once
-    # 2.0.0 is on crates.io.
+    # Absent on purpose: `adk-computer-use`, `adk-devtools`, and `adk-codeact-monty`
+    # are new (unpublished before 2.0.0) and have no published baseline to diff
+    # against, and `adk-rust-macros` exposes no library target for
+    # cargo-semver-checks to read. Add the first three here once 2.0.0 is on
+    # crates.io.
     - name: Semver checks — Beta/Experimental (warn only)
       run: |
         echo "### Beta/Experimental crates (warn only)" >> "$GITHUB_STEP_SUMMARY"

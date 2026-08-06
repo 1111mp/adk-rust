@@ -63,6 +63,7 @@ full = [
     "audio",
     "code",
     "sandbox",
+    "code-tools",
 ]
 
 # CLI launcher support
@@ -165,6 +166,23 @@ agent-registry = ["server", "adk-server/agent-registry"]
 mcp = ["tools", "adk-tool/mcp"]
 mcp-http = ["mcp", "adk-tool/http-transport"]
 mcp-sampling = ["mcp", "adk-tool/mcp-sampling"]
+# Code execution tools over the adk-code substrate (forwarded to adk-tool):
+# CodeTool, PythonCodeTool, JavaScriptCodeTool, FrontendCodeTool,
+# MontyPythonCodeTool. `sandbox` is included because constructing the
+# recommended CodeTool takes an adk-sandbox backend. Included in `full`.
+code-tools = ["tools", "code", "sandbox", "adk-tool/code"]
+# Embedded JavaScript execution via boa_engine — the JavaScriptCodeTool live
+# path (forwarded to adk-tool and adk-code)
+code-embedded-js = ["code-tools", "adk-tool/code-embedded-js", "adk-code/embedded-js"]
+# Embedded Python execution via the Monty interpreter — the MontyPythonCodeTool
+# live path (forwarded to adk-tool and adk-code)
+code-embedded-python = ["code-tools", "adk-tool/code-embedded-python", "adk-code/embedded-python"]
+# Docker SDK-based persistent container execution (forwarded to adk-tool and adk-code)
+code-docker = ["code-tools", "adk-tool/code-docker", "adk-code/docker"]
+# CodeAct agents: the model acts by writing code (forwarded to adk-agent)
+codeact = ["agents", "adk-agent/codeact"]
+# Python CodeRuntime for the CodeActAgent, backed by the Monty interpreter
+codeact-monty = ["codeact", "dep:adk-codeact-monty"]
 # Native Slack toolset (forwarded to adk-tool)
 slack = ["tools", "adk-tool/slack"]
 # Native BigQuery toolset (forwarded to adk-tool)
@@ -233,6 +251,7 @@ adk-telemetry = { workspace = true, optional = true }
 adk-cli = { workspace = true, optional = true }
 adk-graph = { workspace = true, optional = true }
 adk-code = { workspace = true, optional = true }
+adk-codeact-monty = { workspace = true, optional = true }
 adk-sandbox = { workspace = true, optional = true }
 adk-realtime = { workspace = true, optional = true }
 adk-browser = { workspace = true, optional = true }
@@ -271,6 +290,7 @@ name = "performance_0_8_llm_agents"
 required-features = ["minimal"]
 
 [package.metadata.docs.rs]
-# Use "full" to show the complete API surface on docs.rs.
-features = ["full"]
+# Use "full" to show the complete API surface on docs.rs, plus the Monty
+# opt-ins (not part of any tier) so their modules appear in the docs.
+features = ["full", "code-embedded-python", "codeact-monty"]
 rustdoc-args = ["--cfg", "docsrs"]

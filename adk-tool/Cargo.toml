@@ -31,6 +31,8 @@ http-transport = [
 code = ["dep:adk-code", "dep:adk-sandbox"]
 # Enable embedded JavaScript execution (requires boa_engine)
 code-embedded-js = ["code", "adk-code/embedded-js"]
+# Enable embedded Python execution via the Monty interpreter
+code-embedded-python = ["code", "adk-code/embedded-python"]
 # Enable Docker SDK-based persistent container execution
 code-docker = ["code", "adk-code/docker"]
 # Enable native Slack toolset (send messages, read channels, reactions, threads)

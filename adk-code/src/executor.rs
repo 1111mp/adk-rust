@@ -98,6 +98,20 @@ pub trait CodeExecutor: Send + Sync {
     async fn is_running(&self) -> bool {
         true
     }
+
+    /// A prose snippet describing this backend's execution environment and
+    /// built-in capabilities, suitable for appending to an LLM-facing tool
+    /// description.
+    ///
+    /// `None` (the default) means the backend has nothing to add. Backends
+    /// whose behavior depends on construction-time configuration (granted
+    /// filesystem roots, environment variables, registered host functions,
+    /// state persistence semantics) should override this so tools composed
+    /// over `Arc<dyn CodeExecutor>` can surface an accurate environment
+    /// description to the model without downcasting.
+    fn prompt_snippet(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Validates that the backend can enforce the requested sandbox policy.

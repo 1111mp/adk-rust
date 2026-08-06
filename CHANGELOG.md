@@ -60,6 +60,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **adk-code: in-process Python execution via Pydantic Monty** (`embedded-python`
+  feature). One `MontyExecutorBuilder` produces two `CodeExecutor` products:
+  `MontyOneShotExecutor` (fresh interpreter per call) and `MontyReplExecutor`
+  (variables, functions, and imports persist across calls, with
+  `start`/`stop`/`restart` lifecycle). OS access is host-granted at
+  construction — filesystem mounts (read-only/read-write), an explicit
+  environment map, and the clock — and serviced in place; ungranted access
+  raises a catchable in-script `OSError`. Monty has no network or subprocess
+  surface at all. Registered `HostFunction`s (sync or async) become callable
+  Python functions; the drive loop segments across `spawn_blocking` so async
+  host functions are awaited without holding interpreter state across `await`.
+  The per-request `SandboxPolicy` may only narrow within the grants — a grant
+  covers its entire directory subtree (a granted mount or any subdirectory of
+  one may be requested), and requests exceeding the grants are rejected
+  fail-closed with `UnsupportedPolicy`. Mount virtual paths are validated at
+  build time (normalized absolute, unique). Host-side buffers are bounded:
+  `print()` output is capped at `max_stdout_bytes` *during* the drive, and
+  JSON↔Monty conversion is depth-capped so iteratively built deep nesting
+  degrades to a placeholder instead of overflowing the host stack.
+  `SandboxPolicy::strict_python()` added.
+- **adk-code: `CodeExecutor::prompt_snippet()`** — a new defaulted trait method
+  (default `None`, backward compatible) letting backends describe their built
+  execution environment for LLM-facing tool descriptions. Both Monty executors
+  implement it: mode semantics, granted mounts, environment variable names
+  (never values), clock availability, and Python stubs for registered host
+  functions.
+- **adk-tool: `MontyPythonCodeTool`** (`monty_python_code`, feature
+  `code-embedded-python`) — the agent-facing tool over the Monty executors,
+  complementing the container-backed `PythonCodeTool` (which remains unchanged
+  for full-CPython workloads: pip packages, C extensions, the complete
+  standard library). One-shot mode shares a stateless executor; REPL mode keys
+  interpreter sessions by the full ADK session identity (app, user, session
+  id) with an LRU cap (default 100). The
+  tool description is composed from the executor's `prompt_snippet()`, the
+  schema is mode-aware (`reset` exists only in REPL mode), and
+  `MontyPythonCodeTool::builder()` forwards grants, host functions, and
+  limits. The umbrella crate forwards the feature as `code-embedded-python`.
+  New standalone example: `examples/monty_python_code_tool`.
+- **adk-codeact-monty is now publishable** (Experimental tier). The Python
+  `CodeRuntime` for the `CodeActAgent` joins the crates.io release train at the
+  workspace version, so `CodeActAgent` + Python is reachable from a published
+  dependency instead of a git checkout. Its duplicated Monty plumbing is gone:
+  the crate now consumes `adk-code`'s `embedded-python` integration kernel —
+  shared JSON↔Monty conversion (`json_to_monty`/`monty_to_json`), shared
+  OS-call servicing (`resolve_os_call`), a shared `PathAccess`, the shared
+  `pathlib` capability listing, and re-exports of the `monty`/`monty-types`/
+  `monty-fs` crates — so the Monty release is pinned exactly once, by
+  `adk-code`. Behavior change: an ungranted clock now raises a catchable
+  `OSError` (previously `RuntimeError`), matching the executors.
+- **adk-rust: `codeact` and `codeact-monty` umbrella features.** `codeact`
+  forwards `adk-agent/codeact` (the `CodeActAgent` was previously unreachable
+  through the umbrella); `codeact-monty` adds the `adk-codeact-monty` runtime
+  and re-exports it as `adk_rust::codeact_monty`. Both are opt-in specialist
+  features, composable with any tier — like `code-embedded-python`, they are
+  not part of `full`. The docs.rs build now enables the Monty opt-ins so their
+  modules appear in the umbrella documentation.
+- **adk-rust: `code-tools`, `code-embedded-js`, and `code-docker` umbrella
+  features — and `full` now includes `code-tools`.** Previously no tier enabled
+  `adk-tool/code`, so the code-execution tools (`CodeTool`, `PythonCodeTool`,
+  `JavaScriptCodeTool`, `FrontendCodeTool`, `MontyPythonCodeTool`) were
+  unreachable through the umbrella even on `full`, which compiled both
+  `adk-code` and `adk-tool` but not the integration layer between them.
+  `code-tools` forwards `adk-tool/code` (with `code` and `sandbox`, since
+  constructing `CodeTool` takes an adk-sandbox backend); `code-embedded-js`
+  and `code-docker` forward the embedded-JS and persistent-Docker live paths,
+  completing the family alongside `code-embedded-python` (which now implies
+  `code-tools`).
 - **adk-realtime: `DisconnectReason`, so a closed stream can say why.**
   `RealtimeSession::disconnect_reason()` reports the close code and reason the
   provider sent, and `RealtimeRunner::disconnect_reason()` forwards it. The

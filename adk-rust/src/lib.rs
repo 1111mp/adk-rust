@@ -531,6 +531,9 @@ pub mod model {
 /// - `GoogleSearchTool` - Web search
 /// - `ExitLoopTool` - Control loop agents
 /// - `McpToolset` - MCP server integration with the `mcp` feature
+/// - `CodeTool` / `PythonCodeTool` / `JavaScriptCodeTool` / `MontyPythonCodeTool` -
+///   Code execution with the `code-tools` feature (included in `full`); the
+///   embedded live paths need `code-embedded-js` / `code-embedded-python`
 ///
 /// Available with feature: `tools`
 #[cfg(feature = "tools")]
@@ -678,6 +681,21 @@ pub mod computer_use {
 #[cfg_attr(docsrs, doc(cfg(feature = "code")))]
 pub mod code {
     pub use adk_code::*;
+}
+
+/// Python `CodeRuntime` for the CodeActAgent, backed by the Monty interpreter
+/// (experimental).
+///
+/// Lets a [`CodeActAgent`](agent::codeact::CodeActAgent) act by writing Python:
+/// - [`MontyRuntime`](codeact_monty::MontyRuntime) - The `CodeRuntime` implementation
+/// - [`OsAccess`](codeact_monty::OsAccess) - Host-granted filesystem/environment/clock policy
+/// - [`PathAccess`](codeact_monty::PathAccess) - Read-only / read-write mount modes
+///
+/// Available with feature: `codeact-monty` (implies `codeact`)
+#[cfg(feature = "codeact-monty")]
+#[cfg_attr(docsrs, doc(cfg(feature = "codeact-monty")))]
+pub mod codeact_monty {
+    pub use adk_codeact_monty::*;
 }
 
 /// Isolated code execution runtime (experimental — `full` preset).

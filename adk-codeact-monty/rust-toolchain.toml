@@ -1,4 +1,0 @@
-# This out-of-workspace crate keeps an explicit pin so its independent Monty
-# build uses the same supported toolchain as the root workspace.
-[toolchain]
-channel = "1.95.0"

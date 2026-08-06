@@ -42,14 +42,14 @@ let tool = Arc::new(SandboxTool::new(backend));
 
 ## Backend Capability Matrix
 
-| Capability | `ProcessBackend` | `WasmBackend` | `EmbeddedJsExecutor` | `DockerExecutor` |
-|------------|------------------|---------------|----------------------|------------------|
-| Timeout | Enforced | Enforced | Enforced | Enforced |
-| Memory limit | Not enforced | Enforced | Not enforced | Container limits |
-| Network isolation | Not enforced | No WASI network | No API available | Configurable |
-| Filesystem isolation | Not enforced | No WASI preopens | No API available | Configurable |
-| Environment isolation | `env_clear()` | Full | No API available | Configurable |
-| Languages | Rust, Python, JS, TS, Command | Wasm | JavaScript | Python, Node.js |
+| Capability | `ProcessBackend` | `WasmBackend` | `EmbeddedJsExecutor` | Monty executors | `DockerExecutor` |
+|------------|------------------|---------------|----------------------|-----------------|------------------|
+| Timeout | Enforced | Enforced | Enforced | Enforced (in-VM) | Enforced |
+| Memory limit | Not enforced | Enforced | Not enforced | Enforced | Container limits |
+| Network isolation | Not enforced | No WASI network | No API available | No API available | Configurable |
+| Filesystem isolation | Not enforced | No WASI preopens | No API available | Granted mounts only | Configurable |
+| Environment isolation | `env_clear()` | Full | No API available | Granted map only | Configurable |
+| Languages | Rust, Python, JS, TS, Command | Wasm | JavaScript | Python | Python, Node.js |
 
 `ProcessBackend` is honest about what it does not enforce. Use `WasmBackend` for full sandboxing or `DockerExecutor` for container-level isolation.
 
@@ -59,8 +59,12 @@ let tool = Arc::new(SandboxTool::new(backend));
 |------|-------|------|----------|--------|
 | `CodeTool` | `adk-code` | `code_exec` | Rust | `code:execute`, `code:execute:rust` |
 | `SandboxTool` | `adk-sandbox` | `sandbox_exec` | Multi-language | `code:execute` |
+| `PythonCodeTool` | `adk-tool` | `python_code` | Python (container-backed CPython) | `code:execute`, `code:execute:container` |
+| `MontyPythonCodeTool` | `adk-tool` | `monty_python_code` | Python (in-process Monty) | `code:execute` |
 
-Both tools follow the error-as-information pattern: errors are returned as structured JSON with a `"status"` field, never as `ToolError`. This lets agents reason about failures.
+`CodeTool`, `SandboxTool`, and `MontyPythonCodeTool` follow the error-as-information pattern: errors are returned as structured JSON with a `"status"` field, never as `ToolError`. This lets agents reason about failures. `PythonCodeTool` is the exception — it returns a `ToolError` for a missing `code` argument and for executor-level failures; only script-level failures surface as data.
+
+For in-process Python execution — one-shot and REPL modes, OS-access grants, and host functions — see [Python Code Execution](python-code-execution.md).
 
 ## Structured Diagnostics
 

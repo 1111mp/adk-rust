@@ -76,7 +76,6 @@
 
 #![warn(missing_docs)]
 
-mod convert;
 mod os_access;
 mod prompt;
 mod runtime;
@@ -85,5 +84,6 @@ pub use os_access::{OsAccess, OsAccessBuilder, PathAccess};
 pub use runtime::{MontyRuntime, MontyRuntimeBuilder};
 
 /// Re-export of Monty's resource-limit configuration, for
-/// [`MontyRuntimeBuilder::resource_limits`].
-pub use monty_types::ResourceLimits;
+/// [`MontyRuntimeBuilder::resource_limits`]. Sourced through `adk-code`'s
+/// Monty re-exports, so the Monty release is pinned exactly once.
+pub use adk_code::embedded_python::monty_types::ResourceLimits;

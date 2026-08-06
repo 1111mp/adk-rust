@@ -2,8 +2,8 @@
 //!
 //! Monty surfaces every operating-system effect a script attempts — filesystem
 //! reads/writes, `os.getenv`/`os.environ`, and `date.today()`/`datetime.now()` —
-//! as a [`RunProgress::OsCall`](monty::RunProgress::OsCall) the host must
-//! resolve. These calls are **not** tools: they never pause the agent loop and
+//! as a [`RunProgress::OsCall`](adk_code::embedded_python::monty::RunProgress::OsCall)
+//! the host must resolve. These calls are **not** tools: they never pause the agent loop and
 //! never surface as a [`RunStep::Call`](adk_agent::codeact::RunStep). The
 //! runtime services them in place, bounded by the policy described here, and
 //! resumes the interpreter immediately.
@@ -23,64 +23,26 @@
 //!   never exposed.
 //! - **Clock.** `date.today()` and `datetime.now()` read the host clock when
 //!   [`OsAccessBuilder::system_clock`] is enabled (the default), and otherwise
-//!   raise.
+//!   raise a catchable `OSError`.
 //!
 //! Network and subprocess access have no Monty OS-call surface at all, so they
 //! remain unavailable regardless of policy.
+//!
+//! Call servicing itself (environment lookup, clock reads, the mount-table
+//! fallback semantics) is shared with the `adk-code` Monty executors through
+//! [`adk_code::embedded_python::resolve_os_call`], so the two integrations
+//! cannot drift.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use chrono::{Datelike, FixedOffset, Timelike, Utc};
-use monty_fs::{MountCallOutcome, MountMode, MountTable};
-use monty_types::{
-    DictPairs, ExcType, ExtFunctionResult, GetenvArgs, MontyDate, MontyDateTime, MontyException,
-    MontyObject, MontyTimeZone, OsFunctionCall,
-};
+use adk_code::embedded_python::monty_fs::MountTable;
+use adk_code::embedded_python::monty_types::{ExtFunctionResult, OsFunctionCall};
+use adk_code::embedded_python::{SUPPORTED_PATH_METHODS, resolve_os_call};
 
 use adk_agent::codeact::RuntimeError;
 
-/// The exact `pathlib.Path` surface Monty implements, listed for the model when
-/// any path is mounted.
-///
-/// Monty supports only a subset of CPython's `pathlib.Path`, so the model is
-/// told precisely which methods exist (anything else raises `AttributeError`).
-/// Read/query and write methods perform host I/O through the mount table and are
-/// gated by the mount's access mode; the pure path operations never touch the
-/// filesystem and always work.
-// Real newlines (not `\`-continuations) so the leading indentation is preserved
-// in the rendered prompt; the lines are intentionally long.
-const SUPPORTED_PATH_METHODS: &str = "  Monty implements only this subset of `pathlib.Path` (any other method raises AttributeError):
-    - Read/query (any mount): `exists()`, `is_file()`, `is_dir()`, `is_symlink()`, `read_text()`, `read_bytes()`, `stat()`, `iterdir()`, `resolve()`, `absolute()`, `open(\"r\")`.
-    - Write (read-write mounts only): `write_text(s)`, `write_bytes(b)`, `append_text(s)`, `append_bytes(b)`, `mkdir(parents=False, exist_ok=False)`, `unlink()`, `rmdir()`, `rename(target)`, `open(\"w\")`/`open(\"a\")`.
-    - Pure path ops (no I/O, always available): the `/` operator and `joinpath(...)`, `is_absolute()`, `with_name()`, `with_stem()`, `with_suffix()`, `as_posix()`, and the properties `.name`, `.parent`, `.stem`, `.suffix`, `.suffixes`, `.parts`.
-";
-
-/// Access mode for a path made available to a script.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PathAccess {
-    /// Reads succeed; writes raise `PermissionError`.
-    ReadOnly,
-    /// Reads and writes both succeed against the real host directory.
-    ReadWrite,
-}
-
-impl PathAccess {
-    /// Human-readable label used in the prompt (`"read-only"` / `"read-write"`).
-    fn label(self) -> &'static str {
-        match self {
-            Self::ReadOnly => "read-only",
-            Self::ReadWrite => "read-write",
-        }
-    }
-
-    fn mount_mode(self) -> MountMode {
-        match self {
-            Self::ReadOnly => MountMode::ReadOnly,
-            Self::ReadWrite => MountMode::ReadWrite,
-        }
-    }
-}
+pub use adk_code::embedded_python::PathAccess;
 
 /// One host directory mounted at a virtual path, with an access mode.
 #[derive(Debug, Clone)]
@@ -162,64 +124,14 @@ impl OsAccess {
     }
 
     /// Resolve a single OS call against this policy, producing the value (or
-    /// exception) to resume the interpreter with.
-    ///
-    /// The call is consumed: [`MountTable::handle_os_call`] moves a covered
-    /// write's payload into the backend without a copy, and hands the call
-    /// back ([`MountCallOutcome::NotHandled`]) when no mount covers it so the
-    /// fallback can render it.
+    /// exception) to resume the interpreter with. Delegates to the shared
+    /// servicing kernel in `adk-code`.
     pub(crate) fn resolve(
         &self,
         call: OsFunctionCall,
         mounts: &mut MountTable,
     ) -> ExtFunctionResult {
-        match call {
-            OsFunctionCall::Getenv(args) => self.getenv(args),
-            OsFunctionCall::GetEnviron => self.get_environ(),
-            OsFunctionCall::DateToday if self.system_clock => date_today(),
-            OsFunctionCall::DateTimeNow(ref tz) if self.system_clock => datetime_now(tz),
-            // Clock disabled: surface Monty's standard "not supported" error.
-            call @ (OsFunctionCall::DateToday | OsFunctionCall::DateTimeNow(_)) => {
-                ExtFunctionResult::Error(call.on_no_handler())
-            }
-            // Everything else is a filesystem operation routed through the
-            // mount table.
-            call => match mounts.handle_os_call(call) {
-                MountCallOutcome::Handled(Ok(value)) => ExtFunctionResult::Return(value),
-                MountCallOutcome::Handled(Err(err)) => {
-                    ExtFunctionResult::Error(err.into_exception())
-                }
-                // No mount covers this path. Existence checks report `False`
-                // (CPython semantics); anything else is a permission error.
-                MountCallOutcome::NotHandled(call) if call.is_existence_check() => {
-                    ExtFunctionResult::Return(MontyObject::Bool(false))
-                }
-                MountCallOutcome::NotHandled(call) => {
-                    ExtFunctionResult::Error(call.on_no_handler())
-                }
-            },
-        }
-    }
-
-    /// Look up an environment variable, falling back to the call's `default`
-    /// (which Monty already projected to a [`MontyObject`]) when it is unset.
-    fn getenv(&self, args: GetenvArgs) -> ExtFunctionResult {
-        match self.environ.get(&args.key) {
-            Some(value) => ExtFunctionResult::Return(MontyObject::String(value.clone())),
-            None => ExtFunctionResult::Return(args.default),
-        }
-    }
-
-    /// Project the whole environment to a `dict[str, str]` for `os.environ`.
-    fn get_environ(&self) -> ExtFunctionResult {
-        let pairs: Vec<(MontyObject, MontyObject)> = self
-            .environ
-            .iter()
-            .map(|(key, value)| {
-                (MontyObject::String(key.clone()), MontyObject::String(value.clone()))
-            })
-            .collect();
-        ExtFunctionResult::Return(MontyObject::Dict(DictPairs::from(pairs)))
+        resolve_os_call(call, &self.environ, self.system_clock, mounts)
     }
 
     /// Render the OS-access section appended to the system prompt, describing
@@ -380,65 +292,10 @@ impl Default for OsAccessBuilder {
     }
 }
 
-/// Service `date.today()` from the host's local clock.
-fn date_today() -> ExtFunctionResult {
-    let today = chrono::Local::now().date_naive();
-    ExtFunctionResult::Return(MontyObject::Date(MontyDate {
-        year: today.year(),
-        month: today.month() as u8,
-        day: today.day() as u8,
-    }))
-}
-
-/// Service `datetime.now(tz=...)` from the host clock.
-///
-/// `tz` is `None` for a naive local datetime, or a fixed-offset
-/// [`MontyTimeZone`] for an aware one.
-fn datetime_now(tz: &Option<MontyTimeZone>) -> ExtFunctionResult {
-    match tz {
-        None => {
-            let now = chrono::Local::now().naive_local();
-            ExtFunctionResult::Return(MontyObject::DateTime(monty_datetime(&now, None, None)))
-        }
-        Some(zone) => {
-            let Some(offset) = FixedOffset::east_opt(zone.offset_seconds) else {
-                return ExtFunctionResult::Error(MontyException::new(
-                    ExcType::ValueError,
-                    Some(format!("invalid timezone offset: {} seconds", zone.offset_seconds)),
-                ));
-            };
-            let now = Utc::now().with_timezone(&offset).naive_local();
-            ExtFunctionResult::Return(MontyObject::DateTime(monty_datetime(
-                &now,
-                Some(zone.offset_seconds),
-                zone.name.clone(),
-            )))
-        }
-    }
-}
-
-/// Build a [`MontyDateTime`] from a chrono naive datetime and optional offset.
-fn monty_datetime(
-    naive: &chrono::NaiveDateTime,
-    offset_seconds: Option<i32>,
-    timezone_name: Option<String>,
-) -> MontyDateTime {
-    MontyDateTime {
-        year: naive.year(),
-        month: naive.month() as u8,
-        day: naive.day() as u8,
-        hour: naive.hour() as u8,
-        minute: naive.minute() as u8,
-        second: naive.second() as u8,
-        microsecond: naive.nanosecond() / 1_000,
-        offset_seconds,
-        timezone_name,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use adk_code::embedded_python::monty_types::{ExcType, GetenvArgs, MontyObject};
 
     #[test]
     fn getenv_returns_value_or_default() {
@@ -503,7 +360,9 @@ mod tests {
 
         let today = access.resolve(OsFunctionCall::DateToday, &mut mounts);
         match today {
-            ExtFunctionResult::Error(exc) => assert_eq!(exc.exc_type(), ExcType::RuntimeError),
+            // The shared servicing kernel raises a catchable OSError for an
+            // ungranted clock.
+            ExtFunctionResult::Error(exc) => assert_eq!(exc.exc_type(), ExcType::OSError),
             other => panic!("expected a refusal, got {other:?}"),
         }
     }

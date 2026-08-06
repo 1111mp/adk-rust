@@ -21,15 +21,29 @@ filesystem access, an empty environment), but you can grant a script specific
 read-only or read-write paths and an explicit environment map (see
 [OS access](#os-access) below).
 
+## Installation
+
+```toml
+[dependencies]
+adk-agent = { version = "2.0.0", features = ["codeact"] }
+adk-codeact-monty = "2.0.0"
+```
+
+> **Note:** this crate is **Experimental** (see [STABILITY.md](../STABILITY.md)) —
+> the API may change in a minor release; pin an exact version for production use.
+
 ## Dependencies
 
-Monty is on crates.io since `0.0.19`, so this crate is a regular member of the
-`adk-rust` workspace. It depends on three Monty crates that always resolve to
-the same release: [`monty`](https://crates.io/crates/monty) (the interpreter
-and run/repl surface), [`monty-types`](https://crates.io/crates/monty-types)
-(the types that cross the host boundary — `MontyObject`, `OsFunctionCall`,
+The Monty interpreter is consumed through `adk-code`'s `embedded-python`
+integration kernel, which pins the three Monty crates —
+[`monty`](https://crates.io/crates/monty) (the interpreter and run/repl
+surface), [`monty-types`](https://crates.io/crates/monty-types) (the types
+that cross the host boundary — `MontyObject`, `OsFunctionCall`,
 `ResourceLimits`, ...), and [`monty-fs`](https://crates.io/crates/monty-fs)
-(the boundary-enforcing filesystem `MountTable`).
+(the boundary-enforcing filesystem `MountTable`) — in exactly one place, and
+shares the JSON↔Monty conversion and OS-call servicing with the
+`MontyOneShotExecutor`/`MontyReplExecutor` executors, so the two integrations
+cannot drift.
 
 ## Usage
 

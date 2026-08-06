@@ -140,3 +140,9 @@ pub use code_execution::JavaScriptCodeTool;
 
 #[cfg(feature = "code")]
 pub use code_execution::PythonCodeTool;
+
+#[cfg(feature = "code")]
+pub use code_execution::MontyPythonCodeTool;
+
+#[cfg(feature = "code-embedded-python")]
+pub use code_execution::MontyPythonCodeToolBuilder;

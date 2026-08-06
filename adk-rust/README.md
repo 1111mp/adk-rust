@@ -299,7 +299,7 @@ adk-rust = { version = "2.0.0", features = ["standard"] }
 # Enterprise — standard + realtime, browser, rag, payments, awp
 adk-rust = { version = "2.0.0", features = ["enterprise"] }
 
-# Full — enterprise + experimental crates (audio, code, sandbox)
+# Full — enterprise + experimental crates (audio, code, sandbox, code-tools)
 adk-rust = { version = "2.0.0", features = ["full"] }
 
 # Custom

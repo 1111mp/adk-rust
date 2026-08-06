@@ -330,6 +330,23 @@ let search = GoogleSearchTool::new();
 // Add to agent - enables grounded web search
 ```
 
+## Code Execution Tools (`code` feature)
+
+Language-preset tool wrappers over the `adk-code` execution substrate: `CodeTool` (Rust), `JavaScriptCodeTool` (embedded JS via `code-embedded-js`), `PythonCodeTool` (container-backed CPython), and `MontyPythonCodeTool` (in-process Python via `code-embedded-python`).
+
+`MontyPythonCodeTool` runs model-written Python in the Monty interpreter — no container, no subprocess. It supports one-shot mode (fresh interpreter per call) and REPL mode (state persists across calls, scoped per ADK session), with host-granted filesystem/environment/clock access and registered host functions. Its LLM-facing description is composed from the executor's own capability report, so it always matches the built environment. For the full Python ecosystem (pip packages, C extensions, the complete standard library), use the container-backed `PythonCodeTool` instead.
+
+```rust
+use adk_code::PathAccess;
+use adk_tool::MontyPythonCodeTool;
+
+let tool = MontyPythonCodeTool::builder()
+    .allow_path("/data", "/srv/agent/data", PathAccess::ReadOnly)
+    .environ_var("PROJECT", "acme")
+    .system_clock()
+    .build_repl()?;
+```
+
 ## Features
 
 | Feature | Description |
@@ -337,6 +354,9 @@ let search = GoogleSearchTool::new();
 | `mcp` | Local MCP clients via stdio, `McpToolset`, and `McpServerManager` |
 | `http-transport` | Remote MCP servers via streamable HTTP |
 | `mcp-sampling` | Deprecated upstream sampling compatibility |
+| `code` | Code execution tools over the `adk-code` substrate |
+| `code-embedded-js` | `JavaScriptCodeTool` live path (boa_engine) |
+| `code-embedded-python` | `MontyPythonCodeTool` live path (Monty interpreter) |
 
 ## MCP examples and guides
 

@@ -68,6 +68,8 @@ mod container;
 pub mod diagnostics;
 #[cfg(feature = "embedded-js")]
 mod embedded_js;
+#[cfg(feature = "embedded-python")]
+pub mod embedded_python;
 mod error;
 mod executor;
 pub mod harness;
@@ -84,6 +86,11 @@ pub use container::*;
 pub use diagnostics::{RustDiagnostic, parse_diagnostics};
 #[cfg(feature = "embedded-js")]
 pub use embedded_js::*;
+#[cfg(feature = "embedded-python")]
+pub use embedded_python::{
+    HostFunction, HostFunctionError, MontyBuildError, MontyExecutorBuilder, MontyOneShotExecutor,
+    MontyReplExecutor, PathAccess,
+};
 pub use error::*;
 pub use executor::*;
 pub use harness::{HARNESS_TEMPLATE, validate_rust_source};

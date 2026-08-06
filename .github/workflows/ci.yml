@@ -166,6 +166,14 @@ jobs:
           - { package: adk-session, features: vertex-session }
           # ACP replay and server transport behavior are gated behind the opt-in server feature.
           - { package: adk-acp, features: server }
+          # The Monty Python executors and the MontyPythonCodeTool live path: both gated,
+          # so default builds skip them entirely.
+          - { package: adk-code, features: embedded-python }
+          - { package: adk-tool, features: code-embedded-python }
+          # The umbrella's code-execution opt-ins (not part of any tier): the embedded
+          # JS/Python live paths, persistent Docker, and the CodeActAgent + MontyRuntime
+          # forward. `code-tools` itself is covered by the `full` builds in docs/examples.
+          - { package: adk-rust, features: "code-embedded-js,code-embedded-python,code-docker,codeact-monty" }
     steps:
     - uses: actions/checkout@v7
 
