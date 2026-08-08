@@ -14,8 +14,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use rmcp::model::{
     ClientInfo, ElicitRequestParams, ElicitResult, ElicitationAction, ElicitationCapability,
-    ElicitationResponseNotificationParam, ElicitationSchema, FormElicitationCapability,
-    UrlElicitationCapability,
+    ElicitationSchema, FormElicitationCapability, UrlElicitationCapability,
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleClient};
 use serde_json::Value;
@@ -128,6 +127,7 @@ impl ElicitationHandler for AutoDeclineElicitationHandler {
 pub struct AdkClientHandler {
     handler: Arc<dyn ElicitationHandler>,
     resource_notification_handler: Option<Arc<dyn ResourceNotificationHandler>>,
+    tasks: bool,
     #[cfg(feature = "mcp-sampling")]
     sampling_handler: Option<Arc<dyn crate::sampling::SamplingHandler>>,
 }
@@ -138,9 +138,21 @@ impl AdkClientHandler {
         Self {
             handler,
             resource_notification_handler: None,
+            tasks: false,
             #[cfg(feature = "mcp-sampling")]
             sampling_handler: None,
         }
+    }
+
+    /// Declare the SEP-2663 tasks extension during the handshake.
+    ///
+    /// A server decides per call whether to answer `tools/call` with a task, but
+    /// it must not return one to a client that did not declare the extension.
+    /// Without this, [`McpToolset::with_task_support`](crate::mcp::McpToolset::with_task_support)
+    /// configures a path no server will ever take.
+    pub fn with_tasks(mut self) -> Self {
+        self.tasks = true;
+        self
     }
 
     /// Set the handler for resource update and resource-list notifications.
@@ -173,18 +185,20 @@ impl rmcp::handler::client::ClientHandler for AdkClientHandler {
             .with_form(FormElicitationCapability::new())
             .with_url(UrlElicitationCapability::new());
 
+        // The capability builder is typestate, so each `enable_*` returns a
+        // different type and the optional ones cannot be chained conditionally.
         #[cfg(feature = "mcp-sampling")]
         {
-            if self.sampling_handler.is_some() {
-                info.capabilities = rmcp::model::ClientCapabilities::builder()
+            info.capabilities = if self.sampling_handler.is_some() {
+                rmcp::model::ClientCapabilities::builder()
                     .enable_elicitation_with(elicitation)
                     .enable_sampling()
-                    .build();
+                    .build()
             } else {
-                info.capabilities = rmcp::model::ClientCapabilities::builder()
+                rmcp::model::ClientCapabilities::builder()
                     .enable_elicitation_with(elicitation)
-                    .build();
-            }
+                    .build()
+            };
         }
 
         #[cfg(not(feature = "mcp-sampling"))]
@@ -192,6 +206,13 @@ impl rmcp::handler::client::ClientHandler for AdkClientHandler {
             info.capabilities = rmcp::model::ClientCapabilities::builder()
                 .enable_elicitation_with(elicitation)
                 .build();
+        }
+
+        if self.tasks {
+            info.capabilities
+                .extensions
+                .get_or_insert_with(rmcp::model::ExtensionCapabilities::new)
+                .insert(rmcp::model::TASKS_EXTENSION_ID.to_string(), Default::default());
         }
 
         info
@@ -204,7 +225,7 @@ impl rmcp::handler::client::ClientHandler for AdkClientHandler {
         _context: RequestContext<RoleClient>,
     ) -> Result<rmcp::model::CreateMessageResult, rmcp::ErrorData> {
         use crate::sampling::{SamplingContent, SamplingMessage, SamplingRequest};
-        use rmcp::model::{CreateMessageResult, Role, SamplingMessageContent};
+        use rmcp::model::{CreateMessageResult, Role, SamplingMessageContentBlock};
 
         let Some(ref sampling_handler) = self.sampling_handler else {
             return Err(rmcp::ErrorData::new(
@@ -228,10 +249,10 @@ impl rmcp::handler::client::ClientHandler for AdkClientHandler {
                     .content
                     .first()
                     .and_then(|c| match c {
-                        SamplingMessageContent::Text(t) => {
+                        SamplingMessageContentBlock::Text(t) => {
                             Some(SamplingContent::text(t.text.clone()))
                         }
-                        SamplingMessageContent::Image(img) => {
+                        SamplingMessageContentBlock::Image(img) => {
                             Some(SamplingContent::image(img.data.clone(), img.mime_type.clone()))
                         }
                         _ => None,
@@ -336,14 +357,6 @@ impl rmcp::handler::client::ClientHandler for AdkClientHandler {
                 }
             }
         }
-    }
-
-    async fn on_url_elicitation_notification_complete(
-        &self,
-        _params: ElicitationResponseNotificationParam,
-        _context: NotificationContext<RoleClient>,
-    ) {
-        tracing::debug!("received URL elicitation completion notification");
     }
 
     async fn on_resource_updated(
