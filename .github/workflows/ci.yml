@@ -152,6 +152,11 @@ jobs:
           # in combination because no job compiled it.
           - { package: adk-agent, features: ambient }
           - { package: adk-realtime, features: integration }
+          # The OpenAI realtime session and its WebSocket transport are gated behind
+          # `openai`, which is not in adk-realtime's default features, so `--workspace`
+          # never compiled them and no job ever *ran* their tests. The nightly `full`
+          # clippy build compiles them but executes nothing.
+          - { package: adk-realtime, features: openai }
           - { package: adk-managed, features: memory }
           - { package: adk-audio, features: fx }
           - { package: adk-rag, features: lancedb }
