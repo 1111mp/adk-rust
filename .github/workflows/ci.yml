@@ -186,6 +186,11 @@ jobs:
           # JS/Python live paths, persistent Docker, and the CodeActAgent + MontyRuntime
           # forward. `code-tools` itself is covered by the `full` builds in docs/examples.
           - { package: adk-rust, features: "code-embedded-js,code-embedded-python,code-docker,codeact-monty" }
+          # The gemini-agent-platform meta-feature (default `minimal` + gemini-agent-platform):
+          # enforces the growth rule structurally — a forgotten umbrella forwarding
+          # fails this build once the constituent is referenced. The `-full` variant
+          # (realtime stack) is nightly-only to keep PR-tier feedback fast.
+          - { package: adk-rust, features: gemini-agent-platform }
     steps:
     - uses: actions/checkout@v7
 
