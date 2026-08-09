@@ -95,12 +95,82 @@ pub struct NodeContext {
     /// Optional progress handle for idle timeout tracking.
     /// When present, calling [`report_progress()`](Self::report_progress) resets the idle timeout counter.
     progress_handle: Option<ProgressHandle>,
+    /// Set by the executor when this node may invoke other nodes.
+    children: Option<std::sync::Arc<crate::child::ChildInvoker>>,
+    /// The schema of the graph running this node, for a node that projects state.
+    parent_schema: Option<std::sync::Arc<crate::state::StateSchema>>,
 }
 
 impl NodeContext {
     /// Create a new node context
     pub fn new(state: State, config: ExecutionConfig, step: usize) -> Self {
-        Self { state, config, step, progress_handle: None }
+        Self { state, config, step, progress_handle: None, children: None, parent_schema: None }
+    }
+
+    /// The machinery for invoking other nodes, if this context has it.
+    /// The schema of the graph running this node.
+    ///
+    /// Attached by the executor. A node that projects state between two schemas
+    /// needs it; most nodes do not.
+    pub fn parent_schema(&self) -> Option<std::sync::Arc<crate::state::StateSchema>> {
+        self.parent_schema.clone()
+    }
+
+    /// Attaches the running graph's schema.
+    pub fn set_parent_schema(&mut self, schema: std::sync::Arc<crate::state::StateSchema>) {
+        self.parent_schema = Some(schema);
+    }
+
+    pub(crate) fn child_invoker(&self) -> Option<std::sync::Arc<crate::child::ChildInvoker>> {
+        self.children.clone()
+    }
+
+    /// Attach the machinery for invoking other nodes.
+    pub(crate) fn set_child_invoker(
+        &mut self,
+        invoker: std::sync::Arc<crate::child::ChildInvoker>,
+    ) {
+        self.children = Some(invoker);
+    }
+
+    /// Invoke another node and await its output.
+    ///
+    /// The child sees this node's state with `input` merged over it, and returns
+    /// its updates as one object. Nothing is applied to the graph's state: the
+    /// caller decides what to do with the result.
+    ///
+    /// A child that already completed under the same identity is not run again
+    /// after a resume. See [`crate::child`] for how that identity is formed, and
+    /// why a resumable parent should pass its own run id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GraphError::NodeNotFound`](crate::error::GraphError::NodeNotFound)
+    /// when no node has that name, whatever the child returns, and
+    /// [`GraphError::Interrupted`](crate::error::GraphError::Interrupted) when the
+    /// child pauses.
+    pub async fn run_node(&self, child: &str, input: Value) -> Result<Value> {
+        self.run_node_with(child, input, crate::child::RunNodeOptions::default()).await
+    }
+
+    /// Invoke another node with an explicit run id.
+    ///
+    /// # Errors
+    ///
+    /// As [`run_node`](Self::run_node), and additionally when this node was not
+    /// given the ability to invoke children.
+    pub async fn run_node_with(
+        &self,
+        child: &str,
+        input: Value,
+        options: crate::child::RunNodeOptions,
+    ) -> Result<Value> {
+        let invoker = self.children.as_ref().ok_or_else(|| {
+            crate::error::GraphError::InvalidGraph(
+                "this node cannot invoke other nodes: no child invoker was attached".to_string(),
+            )
+        })?;
+        invoker.run(child, input, options, self).await
     }
 
     /// Get a value from state
@@ -159,12 +229,82 @@ pub struct NodeOutput {
     pub interrupt: Option<Interrupt>,
     /// Custom stream events
     pub events: Vec<StreamEvent>,
+    /// Nodes to run next, replacing this node's declared outgoing edges.
+    pub goto: Option<Vec<String>>,
+    /// Nodes of the *parent* graph to run next, when this graph is a subgraph.
+    ///
+    /// A node deep in a nested graph can end its own graph and hand control to a
+    /// node of the graph that holds it.
+    pub goto_parent: Option<Vec<String>>,
 }
 
 impl NodeOutput {
     /// Create a new empty output
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Names the nodes to run next, replacing this node's declared edges.
+    ///
+    /// A conditional edge fixes its targets when the graph is built. This does
+    /// not: a node reads state and names any node in the graph, including one it
+    /// has no edge to. Naming [`END`](crate::edge::END) stops the branch.
+    ///
+    /// The declared edges from this node do not also fire. Setting no goto leaves
+    /// the declared edges in charge, which is the default.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use adk_graph::node::NodeOutput;
+    /// use serde_json::json;
+    ///
+    /// // Write state and choose the next node in one step.
+    /// let output = NodeOutput::new()
+    ///     .with_update("risk", json!("high"))
+    ///     .with_goto(["escalate"]);
+    /// assert_eq!(output.goto.as_deref(), Some(&["escalate".to_string()][..]));
+    /// ```
+    /// Names nodes of the *parent* graph to run next.
+    ///
+    /// Only meaningful inside a [`SubgraphNode`](crate::subgraph::SubgraphNode).
+    /// The subgraph finishes, its output channels are projected out as usual, and
+    /// the parent continues at the named nodes rather than following the
+    /// subgraph node's own edges. This is the counterpart to LangGraph's
+    /// `Command(goto=..., graph=Command.PARENT)`.
+    ///
+    /// A name the parent does not hold fails the run with
+    /// [`GraphError::UnknownRouteTarget`](crate::error::GraphError::UnknownRouteTarget),
+    /// checked by the parent, which is the only side that knows its own nodes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use adk_graph::node::NodeOutput;
+    /// use serde_json::json;
+    ///
+    /// // Inside a subgraph: give up, and let the parent's escalation path run.
+    /// let output = NodeOutput::new()
+    ///     .with_update("reason", json!("no confident answer"))
+    ///     .with_goto_parent(["escalate"]);
+    /// assert_eq!(output.goto_parent.as_deref(), Some(&["escalate".to_string()][..]));
+    /// ```
+    pub fn with_goto_parent<I, S>(mut self, targets: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.goto_parent = Some(targets.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn with_goto<I, S>(mut self, targets: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.goto = Some(targets.into_iter().map(Into::into).collect());
+        self
     }
 
     /// Add a state update
@@ -220,6 +360,18 @@ pub trait Node: Send + Sync {
     /// # Errors
     ///
     /// Returns an error describing what is unavailable. The default accepts the node.
+    /// Checks this node against the schema of the graph that holds it.
+    ///
+    /// Called by [`StateGraph::compile`](crate::graph::StateGraph::compile) for
+    /// every node, so a node that has requirements on its parent states them
+    /// before anything runs. Defaults to accepting any parent.
+    ///
+    /// [`SubgraphNode`](crate::subgraph::SubgraphNode) uses this to reject a
+    /// channel mapping that names a channel neither side declares.
+    fn validate_against(&self, _parent: &crate::state::StateSchema) -> Result<()> {
+        Ok(())
+    }
+
     fn validate(&self) -> Result<()> {
         Ok(())
     }
@@ -240,6 +392,19 @@ pub trait Node: Send + Sync {
                 Ok(output) => {
                     for event in output.events {
                         yield Ok(event);
+                    }
+                    // A goto and an interrupt have no other way through: this path
+                    // yields events, not a NodeOutput, so the executor reads both
+                    // back off the stream.
+                    if let Some(targets) = output.goto {
+                        yield Ok(StreamEvent::route_dispatched(&name, targets));
+                    }
+                    if let Some(interrupt) = output.interrupt {
+                        let (message, data) = match interrupt {
+                            crate::interrupt::Interrupt::Dynamic { message, data } => (message, data),
+                            other => (other.to_string(), None),
+                        };
+                        yield Ok(StreamEvent::node_interrupt(&name, &message, data));
                     }
                     yield Ok(StreamEvent::Updates { node: name, updates: output.updates });
                 }
@@ -281,9 +446,17 @@ impl Node for FunctionNode {
     }
 
     async fn execute(&self, ctx: &NodeContext) -> Result<NodeOutput> {
+        // The closure takes an owned context, so everything the executor attached
+        // has to be carried across or the node silently loses it.
         let mut ctx_owned = NodeContext::new(ctx.state.clone(), ctx.config.clone(), ctx.step);
         if let Some(handle) = ctx.progress_handle() {
             ctx_owned.set_progress_handle(handle.clone());
+        }
+        if let Some(invoker) = ctx.child_invoker() {
+            ctx_owned.set_child_invoker(invoker);
+        }
+        if let Some(schema) = ctx.parent_schema() {
+            ctx_owned.set_parent_schema(schema);
         }
         (self.func)(ctx_owned).await
     }
@@ -319,6 +492,12 @@ pub type AgentInputMapper = Box<dyn Fn(&State) -> adk_core::Content + Send + Syn
 pub type AgentOutputMapper =
     Box<dyn Fn(&[adk_core::Event]) -> HashMap<String, Value> + Send + Sync>;
 
+/// Chooses an [`AgentNode`]'s successors from the updates it just produced.
+///
+/// Returning `None` leaves the node's declared edges in charge.
+pub type AgentGotoMapper =
+    Box<dyn Fn(&HashMap<String, Value>) -> Option<Vec<String>> + Send + Sync>;
+
 /// Wrapper to use an existing ADK Agent as a graph node
 pub struct AgentNode {
     name: String,
@@ -328,6 +507,8 @@ pub struct AgentNode {
     input_mapper: AgentInputMapper,
     /// Map agent events to state updates
     output_mapper: AgentOutputMapper,
+    /// Choose successors from the mapped updates, replacing declared edges.
+    goto_mapper: Option<AgentGotoMapper>,
 }
 
 impl AgentNode {
@@ -339,6 +520,7 @@ impl AgentNode {
             agent,
             input_mapper: Box::new(default_input_mapper),
             output_mapper: Box::new(default_output_mapper),
+            goto_mapper: None,
         }
     }
 
@@ -357,6 +539,38 @@ impl AgentNode {
         F: Fn(&[adk_core::Event]) -> HashMap<String, Value> + Send + Sync + 'static,
     {
         self.output_mapper = Box::new(mapper);
+        self
+    }
+
+    /// Chooses this node's successors from the updates the output mapper produced.
+    ///
+    /// An agent's answer often decides where control goes next. The output mapper
+    /// turns the agent's events into state; this turns that state into a route,
+    /// so the classification is parsed once.
+    ///
+    /// Returning `None` leaves the declared edges in charge. Returning targets
+    /// replaces them, exactly as [`NodeOutput::with_goto`] does for a plain node.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use adk_graph::node::AgentNode;
+    /// # use std::collections::HashMap;
+    /// # fn wire(node: AgentNode) -> AgentNode {
+    /// node.with_goto_mapper(|updates: &HashMap<String, serde_json::Value>| {
+    ///     match updates.get("category").and_then(|v| v.as_str()) {
+    ///         Some("refund") => Some(vec!["refund_desk".to_string()]),
+    ///         Some(_) => Some(vec!["general_desk".to_string()]),
+    ///         None => None,
+    ///     }
+    /// })
+    /// # }
+    /// ```
+    pub fn with_goto_mapper<F>(mut self, mapper: F) -> Self
+    where
+        F: Fn(&HashMap<String, Value>) -> Option<Vec<String>> + Send + Sync + 'static,
+    {
+        self.goto_mapper = Some(Box::new(mapper));
         self
     }
 }
@@ -440,9 +654,13 @@ impl Node for AgentNode {
 
         // Map events to state updates
         let updates = (self.output_mapper)(&events);
+        let goto = self.goto_mapper.as_ref().and_then(|mapper| mapper(&updates));
 
         // Convert agent events to stream events for tracing
         let mut output = NodeOutput::new().with_updates(updates);
+        if let Some(targets) = goto {
+            output = output.with_goto(targets);
+        }
         for event in &events {
             if let Ok(json) = serde_json::to_value(event) {
                 output = output.with_event(StreamEvent::custom(&self.name, "agent_event", json));
@@ -461,6 +679,7 @@ impl Node for AgentNode {
         let agent = self.agent.clone();
         let input_mapper = &self.input_mapper;
         let output_mapper = &self.output_mapper;
+        let goto_mapper = &self.goto_mapper;
         let parent_context = ctx.config.parent_context.clone();
         let thread_id = ctx.config.thread_id.clone();
         let content = (input_mapper)(&ctx.state);
@@ -524,10 +743,12 @@ impl Node for AgentNode {
             // Report state updates from this run. Without this the streaming
             // executor has no updates to apply and would have to run the agent
             // a second time to obtain them.
-            yield Ok(StreamEvent::Updates {
-                node: name.clone(),
-                updates: (output_mapper)(&all_events),
-            });
+            let updates = (output_mapper)(&all_events);
+            // Same route the plain path uses: this yields events, not a NodeOutput.
+            if let Some(targets) = goto_mapper.as_ref().and_then(|mapper| mapper(&updates)) {
+                yield Ok(StreamEvent::route_dispatched(&name, targets));
+            }
+            yield Ok(StreamEvent::Updates { node: name.clone(), updates });
         })
     }
 }

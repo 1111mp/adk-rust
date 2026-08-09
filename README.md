@@ -8,7 +8,7 @@
 ![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)
 [![GitHub Discussions](https://img.shields.io/github/discussions/zavora-ai/adk-rust?style=flat&logo=github&color=5865F2)](https://github.com/zavora-ai/adk-rust/discussions)
 
-> **v2.0.0 release candidate — unpublished.** The 42-crate v2 workspace is being stabilized; v2 has not been published to crates.io. The candidate targets the official `rmcp 2.2` MCP SDK (protocol `2025-11-25`) with effective HTTP configuration, official `agent-client-protocol` 1.2 for ACP with exact capability publication, the new `adk-computer-use` governed desktop-automation layer, `adk-devtools` coding-agent tools, and live async tool confirmation keyed by function-call ID. See the [migration guide](docs/official_docs/migration/1.0-to-2.0.md) for the planned breaking changes and [CHANGELOG](CHANGELOG.md) for full details.
+> **v2.0.0 release candidate — unpublished.** The 42-crate v2 workspace is being stabilized; v2 has not been published to crates.io. The candidate targets the official `rmcp 3.1` MCP SDK (advertising protocol `2025-11-25`, reaching `2026-07-28` servers) with effective HTTP configuration, official `agent-client-protocol` 1.2 for ACP with exact capability publication, the new `adk-computer-use` governed desktop-automation layer, `adk-devtools` coding-agent tools, and live async tool confirmation keyed by function-call ID. See the [migration guide](docs/official_docs/migration/1.0-to-2.0.md) for the planned breaking changes and [CHANGELOG](CHANGELOG.md) for full details.
 >
 > **Release transition:** This banner changes to “Released” only after all 42 v2.0.0 crates are available on crates.io. The roadmap marker then changes from “release candidate” to “current.”
 >
@@ -1034,6 +1034,10 @@ Validated examples in this repo include:
 - `cargo run -p adk-realtime --example openai_session_update --features openai` — OpenAI Realtime session mutation.
 - `cargo run -p adk-realtime --example vertex_live_voice --features vertex-live` — Vertex AI Live voice session.
 - `cargo run --manifest-path examples/awp_agent/Cargo.toml` — Agentic Web Protocol server example.
+- `cargo run --manifest-path examples/graph_resilient_research/Cargo.toml` — an `LlmAgent` calls a whole graph as one tool. Three sources fan out, a source that returns 503 is recorded by a node error handler instead of ending the run, and the desk's checkpoint history is read back afterwards.
+- `cargo run --manifest-path examples/graph_subgraph_claims/Cargo.toml` — an insurance claim handled by three graphs, two nested. An adjuster gate pauses the run two graphs deep, the resume re-prices nothing, and a claim the model cannot value escalates to a node the inner graph has no edge to.
+- `cargo run --manifest-path examples/graph_goto_routing/Cargo.toml` — a support desk where an `LlmAgent` names the node that handles each ticket. The graph declares no edge out of the classifier, so the model's answer is the route.
+- `cargo run --manifest-path examples/graph_parity_openai/Cargo.toml` — an OpenAI review pipeline over `adk-graph`: the planner decides how many reviewers to run, the graph invokes them imperatively under a concurrency bound, and a resumed pause re-uses the completed reviews instead of paying for them twice.
 - `cargo run --manifest-path examples/multi_perspective_analysis/Cargo.toml` — three LLM analysts running concurrently under `ParallelAgent`, with per-branch timing.
 
 ## Development

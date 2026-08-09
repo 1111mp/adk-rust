@@ -231,6 +231,7 @@ pub fn build_reference_graph_with_checkpointer(
             "lease",
             "receipt",
             "verified",
+            "committed",
             "result",
         ]);
         // A resumed caller cannot overwrite an append-only channel. Supplying another preview
@@ -283,7 +284,11 @@ pub fn build_reference_graph_with_checkpointer(
             }
             Ok(NodeOutput::new().with_update("observations_joined", json!(true)))
         },
-        DeferredNodeConfig { merge_strategy: MergeStrategy::Collect, fan_in_timeout: None },
+        DeferredNodeConfig {
+            merge_strategy: MergeStrategy::Collect,
+            fan_in_timeout: None,
+            ..Default::default()
+        },
     )
     .add_node_fn("plan", |ctx| async move {
         let proposed = ctx
@@ -559,6 +564,10 @@ pub fn build_reference_graph_with_checkpointer(
     .add_edge("execute", "verify")
     .add_edge("verify", END)
     .compile()
+    // This graph is governed: a digest decides what may run. A node writing a
+    // channel name the schema does not hold would take overwrite semantics and
+    // report nothing, so the write is rejected instead.
+    .map(CompiledGraph::with_strict_channels)
     .map(|graph| match checkpointer {
         Some(checkpointer) => graph.with_checkpointer_arc(checkpointer),
         None => graph,

@@ -143,6 +143,10 @@ jobs:
           - { package: adk-agent, features: codeact }
           - { package: adk-model, features: openrouter }
           - { package: adk-sandbox, features: wasm }
+          # The background run store and its persistence are behind `background`, so a
+          # default --workspace build skips their tests entirely. Nothing compiled them
+          # when durable run records were added.
+          - { package: adk-server, features: background }
           # sandbox-linux is Linux-only *and* feature-gated, so nothing built it until a
           # container run found the bubblewrap probe could never succeed and that its
           # property tests did not compile.
@@ -157,7 +161,17 @@ jobs:
           # never compiled them and no job ever *ran* their tests. The nightly `full`
           # clippy build compiles them but executes nothing.
           - { package: adk-realtime, features: openai }
+          # Two entries on purpose. `memory` alone looked like coverage while leaving
+          # `sandbox` unbuilt: adk-sandbox renamed a field of EnforcedLimits in #485 and
+          # a call site behind `sandbox` kept the old name for two releases, because
+          # nothing compiled it. `full` is sandbox + memory and closes that.
+          #
+          # `memory` stays because branch protection requires the check by its rendered
+          # name, `feature-coverage (adk-managed, memory)`. Removing the entry leaves
+          # that requirement waiting for a status no job will ever report, which blocks
+          # every PR. Drop it only together with the branch-protection entry.
           - { package: adk-managed, features: memory }
+          - { package: adk-managed, features: full }
           - { package: adk-audio, features: fx }
           - { package: adk-rag, features: lancedb }
           # adk-auth's SSO/OAuth surface: gated behind `sso`, so `--workspace` without
@@ -181,6 +195,19 @@ jobs:
           # so an rmcp rename broke the sampling handler while workspace clippy stayed at
           # zero. Named here so the coverage no longer depends on an example crate.
           - { package: adk-tool, features: mcp-sampling }
+          # No workspace member enables these four, so `--workspace` never compiled
+          # them and their only cover was a standalone example crate. Four clippy
+          # failures and two uncompilable doc examples sat on main as a result.
+          # `time-travel` is absent on purpose: adk-cli already enables it, so the
+          # workspace build reaches it.
+          - { package: adk-graph, features: functional }
+          - { package: adk-graph, features: sqlite }
+          - { package: adk-graph, features: node-cache }
+          - { package: adk-graph, features: delta-checkpoint }
+          # The umbrella forwards, because `graph` alone gives adk-graph its
+          # default features, which are empty.
+          - { package: adk-rust, features: graph-sqlite }
+          - { package: adk-rust, features: graph-functional }
           # The sqlx-backed production backends. None were built by any job, so a
           # second sqlx major entering the graph through pgvector went unnoticed:
           # `adk-memory --features database-memory` stopped compiling entirely

@@ -193,7 +193,10 @@ every `ci.yml` dependency and matrix entry succeeds. See CONTRIBUTING.md
   PSScriptAnalyzer on staged `*.ps1` via `scripts/lint-powershell.ps1` (skips
   itself when the module is not installed).
 - **pre-push** — `cargo check --workspace` (a fast compilation check, not the full
-  test suite). CI is the full-suite safety net, so the local gate stays quick.
+  test suite), plus `scripts/check-examples-compile.sh` over all four shards when
+  an example or a workspace crate it depends on has changed. The standalone
+  examples are outside the workspace, so nothing else compiles them. CI is the
+  full-suite safety net, so the local gate stays quick.
 
 ### AI Agent Workflow (`devenv`)
 
@@ -413,6 +416,14 @@ Domain add-ons are composable with any tier: `features = ["minimal", "audio"]`.
 Platform meta-features (composable with any tier):
 - `gemini-agent-platform` — every Gemini Enterprise Agent Platform (Vertex/EAP) integration except realtime transports: `gemini-vertex`, `vertex-session`, `gcp-secrets` (grows as later integrations land). The right default for ReasoningEngine BYOC deployments. Deploy-time tooling is host-side and excluded.
 - `gemini-agent-platform-full` — `gemini-agent-platform` + `vertex-live` (Vertex AI Live API, pulls in the adk-realtime stack)
+
+Graph capability features (forwarded to `adk-graph`, which has no default features):
+- `graph-functional` — the functional API (`#[entrypoint]`/`#[task]`), in `full`
+- `graph-node-cache` — node result caching with content keys, in `full`
+- `graph-delta` — delta checkpoints, in `full`
+- `graph-time-travel` — step, fork and state history, in `full`
+- `graph-sqlite` — the SQLite checkpointer; needs a database, so not in `full`
+- `graph-redis-cache` — Redis-backed node cache; needs a server, so not in `full`
 
 Production backend features (require external infrastructure, NOT included in `full`):
 - `postgres-session`, `redis-session`, `mongodb-session`, `firestore-session`, `neo4j-session`,

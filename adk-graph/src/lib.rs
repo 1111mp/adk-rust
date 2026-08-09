@@ -71,6 +71,7 @@
 
 pub mod agent;
 pub mod checkpoint;
+pub mod child;
 pub mod deferred;
 pub mod edge;
 pub mod error;
@@ -78,9 +79,12 @@ pub mod executor;
 pub mod graph;
 pub mod interrupt;
 pub mod node;
+pub mod retry;
 pub mod state;
 pub mod stream;
+pub mod subgraph;
 pub mod timeout;
+pub mod tool;
 
 #[cfg(feature = "node-cache")]
 pub mod cache;

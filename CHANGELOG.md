@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- **`DeferredNodeConfig` gained a public `min_predecessors` field.** Every struct
+  literal needs `min_predecessors: None` to keep the previous behaviour, which is
+  to release the join when all direct predecessors have arrived. `Some(n)` releases
+  after *n* of them, for a quorum instead of a full join.
+- **`CompiledGraph::get_next_nodes` returns `Result<Vec<String>>`.** A router
+  answering with a key that is not among the declared targets previously stopped
+  that branch and the run reported success with the target never executed. It now
+  gives `GraphError::UnknownRouteTarget`, naming the key and listing the declared
+  ones. A route to `END` stays legal, because `END` is declared.
+- **`CompiledGraph::time_travel` returns `Result<TimeTravelHandle>`.** It used to
+  panic when the graph had no checkpointer. Add `?` at the call site.
+
 - **`ConnectionRefresher::call_tool` and `SimpleClient::call_tool` return
   `CallToolResponse`** instead of `CallToolResult`. SEP-2663 lets a server answer
   `tools/call` with a task, and SEP-2322 with a request for more input, so the
@@ -35,8 +47,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PR-tier feature-coverage matrix; nothing in the workspace enabled it, so its
   only cover was an example crate.
 
+### Changed
+
+- **A graph's default `recursion_limit` is 100, up from 50.** `LlmAgent`'s tool loop
+  already allowed 100, so a graph stopped at half the budget an agent got, for no
+  stated reason. A cycle now runs twice as far before
+  `GraphError::RecursionLimitExceeded`.
+- **`RetryPolicy::default()` allows ten attempts, up from one.** One attempt made
+  the default a no-op. Ten attempts sleep about 243 seconds in total, so a node that
+  keeps failing takes roughly four minutes to give up; lower `max_attempts` where a
+  caller is waiting. Retry is still opt-in: a node with **no** policy runs once.
+
 ### Added
 
+- **`adk-graph` parity and reliability work.** Each item is off by default, so an
+  existing graph behaves as it did:
+  - **Routing from inside a node.** `NodeOutput::with_goto` names the successors,
+    replacing that node's declared edges, so a node reaches a node it has no edge
+    to. `AgentNode::with_goto_mapper` derives the route from the updates its output
+    mapper produced, so an agent routes on its own answer. Naming `END` stops the
+    branch; an unknown name fails the run.
+  - **Per-node retry.** `RetryPolicy` with capped exponential backoff and jitter,
+    attached by `with_node_retry`. An interrupt is never retried. The attempt count
+    is checkpointed, so a resumed run continues the budget.
+  - **A concurrency bound.** `with_max_concurrency` caps how many nodes run at
+    once, admitting the frontier in sorted order.
+  - **Invoking a node directly.** `ctx.run_node_with(name, input, options)` runs a
+    node the graph has no edge to, sized from state. Completed children are
+    recorded under `<parent>/<child>@<run_id>`, so a resume returns the recorded
+    answer instead of paying for the child again.
+  - **A graph or a node as a tool.** `NodeTool::for_graph` and `for_node` expose
+    either through the `Tool` trait, reporting long-running so a graph pause travels
+    the existing tool-confirmation path.
+  - **An *n*-of-*m* join.** `DeferredNodeConfig::min_predecessors` releases a join
+    on a quorum.
+  - **Channel enforcement.** `with_strict_channels` fails the run when a node writes
+    a channel the schema does not declare, which otherwise took the overwrite
+    reducer silently.
+  - **`StreamEvent::NodeInterrupt`.** A node reporting a pause on the streamed
+    path. The executor converts it into the pause and does not forward it, so a
+    caller still sees only `Interrupted`.
+  - **Subgraphs.** `SubgraphNode` runs a compiled graph as a node, exchanging
+    named channels. A pause inside pauses the parent. A channel mapping naming a
+    channel neither side declares fails when the parent compiles, through a new
+    `Node::validate_against(&parent_schema)` that `compile()` calls for every node.
+  - **`NodeOutput::with_goto_parent`.** A node inside a subgraph ends its own graph
+    and names a node of the graph that holds it, read from the new
+    `CompiledGraph::invoke_detailed`. The counterpart to LangGraph's
+    `Command(graph=Command.PARENT)`.
+  - **`CompiledGraph::with_node_defaults`.** One retry, timeout or failure handler
+    for every node that sets none; a per-node value wins. A graph-wide
+    `default_timeout` already existed on `GraphAgentBuilder`.
+  - **`CompiledGraph::with_node_error_handler`.** Once a node's retry budget is
+    spent, a handler may record the failure and name a recovery node instead of
+    ending the run. An interrupt never reaches it.
+  - **Checkpoint retention.** `CompiledGraph::with_checkpoint_retention` bounds how
+    many checkpoints a thread keeps, by count, by age, or both, pruned after each
+    save. The newest is never discarded, because it is the one a resume loads.
+    `Checkpointer::prune` has a default that keeps everything, so a custom backend
+    is unaffected. A long-running thread previously grew without bound; LangGraph
+    documents the same growth and advises an external cron job.
+  - **Background runs survive a restart.** `adk-server`'s `RunStore` held runs in
+    an in-memory map, so graph state survived a restart through a checkpointer but
+    the list of runs did not, and a restarted server could not report what had been
+    in flight. `RunPersistence` records them, `FileRunPersistence` writes one JSON
+    file through a temporary and a rename, and `RunStore::restore` loads them at
+    startup — reporting any run that was `Running` or `Queued` as `Failed`, because
+    it cannot still be running. A restored run gets a live cancellation token. A
+    networked backend is a follow-up; the trait is the seam for one. Finished runs
+    are bounded by default — `RunRetention` keeps the newest 1000 and discards the
+    rest from both the map and the records, because a store that persists every
+    finished run forever is a leak that only appears after weeks. A run still in
+    flight is never discarded.
+  - **`FileManagedStateStore`.** The first `ManagedStateStore` reporting
+    `Durability::CrashDurable`, so a managed session can be reconstructed after
+    process loss. One JSON file per session, synced and renamed, so an acknowledged
+    write is persisted and a reader never sees a partial snapshot. Session ids are
+    escaped, so an id containing a path separator cannot write outside the root.
+    `InMemoryManagedStateStore` remains, and still reports `ProcessLocal`.
+  - **Umbrella features.** `graph-functional`, `graph-node-cache`, `graph-delta`,
+    `graph-time-travel`, `graph-sqlite`, and `graph-redis-cache` on `adk-rust`
+    forward to `adk-graph`, which has no default features. The first four are in
+    `full`.
 - **`gemini-agent-platform` / `gemini-agent-platform-full` umbrella meta-features.** One
   switch that pulls in every Gemini Enterprise Agent Platform (Vertex/EAP)
   integration, composable with any tier preset:
@@ -66,6 +158,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Fixed
+
+- **`StreamMode::Messages` ignored every interrupt and wrote no checkpoint.** That
+  mode runs nodes in its own loop to forward tokens as they arrive, and both
+  interrupt checks lived in `execute_super_step`, which the loop never calls. So
+  `interrupt_before`, `interrupt_after`, and a node's own
+  `NodeOutput::interrupt` were all silently skipped — an approval gate did not
+  hold — and a completed run left nothing to resume from. The checks now live in
+  `gate_before`/`gate_after`, which both paths call, a node's pause travels as
+  `StreamEvent::NodeInterrupt` because that path yields events and no
+  `NodeOutput`, and the loop checkpoints each super-step. `GraphAgent`'s
+  `Agent::run` uses `invoke` and was never affected.
+- **A static interrupt could not be resumed past.** `interrupt_before` re-armed on
+  every resume, so the gated node never ran. `interrupt_after` had the same defect
+  and needed the opposite fix, because that node has already applied its updates.
+  A `cleared_interrupt` marker is now checkpointed, with a SQLite column, so the
+  durable backend keeps it too.
+- **A fan-in node ran once per arriving branch.** Branches of unequal length made
+  the join fire more than once. A node with more than one incoming direct edge is
+  now deferred automatically at compile time. Conditional predecessors are excluded
+  from the count, because a branch that never fires would stall the join.
+- **Parallel state updates depended on completion order.** Two nodes appending to
+  the same channel produced a different array depending on which finished first.
+  Updates now apply in sorted node order, and by sorted key within a node.
+- **An interrupt's data did not reach a caller through `GraphAgent`.** The pause is
+  now carried as a JSON payload under one reserved `provider_metadata` key, with
+  `GraphInterruptPayload::from_event` to read it back.
+- **`StreamEvent::RouteDispatched` was never emitted.** The debug stream now reports
+  one per conditional edge.
+
 
 - **`adk-memory --features database-memory` compiles again.** `pgvector` accepts
   `sqlx >= 0.8, < 0.10` and resolved to 0.9 while the workspace pinned 0.8, so

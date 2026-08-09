@@ -157,14 +157,23 @@ impl Agent for GraphAgent {
                     }
                 }
                 Err(GraphError::Interrupted(interrupt)) => {
-                    // Create an interrupt event
+                    // The `Agent` trait yields events, so an interrupt cannot be
+                    // returned as an error without ending the invocation. Emit one
+                    // event carrying the structured pause so a caller can read the
+                    // node, the payload, and the checkpoint to resume from.
+                    let payload = crate::interrupt::GraphInterruptPayload::new(
+                        &interrupt.interrupt,
+                        &interrupt.thread_id,
+                        &interrupt.checkpoint_id,
+                    );
                     let mut event = Event::new("graph_interrupted");
-                    event.set_content(Content::new("assistant").with_text(format!(
-                        "Graph interrupted: {:?}\nThread: {}\nCheckpoint: {}",
-                        interrupt.interrupt,
-                        interrupt.thread_id,
-                        interrupt.checkpoint_id
-                    )));
+                    event.set_content(
+                        Content::new("assistant").with_text(interrupt.interrupt.to_string()),
+                    );
+                    event.provider_metadata.insert(
+                        crate::interrupt::INTERRUPT_METADATA_KEY.to_string(),
+                        payload.to_metadata_value(),
+                    );
                     yield Ok(event);
                 }
                 Err(e) => {
@@ -239,6 +248,7 @@ pub struct GraphAgentBuilder {
     interrupt_before: Vec<String>,
     interrupt_after: Vec<String>,
     recursion_limit: usize,
+    max_concurrency: Option<usize>,
     input_mapper: Option<InputMapper>,
     output_mapper: Option<OutputMapper>,
     before_callback: Option<BeforeAgentCallback>,
@@ -262,7 +272,8 @@ impl GraphAgentBuilder {
             checkpointer: None,
             interrupt_before: vec![],
             interrupt_after: vec![],
-            recursion_limit: 50,
+            recursion_limit: 100,
+            max_concurrency: None,
             input_mapper: None,
             output_mapper: None,
             before_callback: None,
@@ -387,6 +398,14 @@ impl GraphAgentBuilder {
     }
 
     /// Set recursion limit
+    /// Cap how many nodes execute concurrently within one super-step.
+    ///
+    /// See [`CompiledGraph::with_max_concurrency`](crate::graph::CompiledGraph::with_max_concurrency).
+    pub fn max_concurrency(mut self, limit: usize) -> Self {
+        self.max_concurrency = Some(limit.max(1));
+        self
+    }
+
     pub fn recursion_limit(mut self, limit: usize) -> Self {
         self.recursion_limit = limit;
         self
@@ -469,6 +488,19 @@ impl GraphAgentBuilder {
     ///     })
     ///     .build()?;
     /// ```
+    /// Configure fan-in for a node already added with [`node`](Self::node).
+    ///
+    /// [`deferred_node`](Self::deferred_node) both adds and configures a node, so
+    /// a custom `Node` added through `node` had no way to set a merge strategy or
+    /// a fan-in timeout.
+    ///
+    /// A node reached by more than one unconditional edge is deferred
+    /// automatically; this overrides that default.
+    pub fn mark_deferred(mut self, name: &str, config: DeferredNodeConfig) -> Self {
+        self.deferred_configs.insert(name.to_string(), config);
+        self
+    }
+
     pub fn deferred_node<F, Fut>(mut self, name: &str, func: F, config: DeferredNodeConfig) -> Self
     where
         F: Fn(NodeContext) -> Fut + Send + Sync + 'static,
@@ -629,6 +661,7 @@ impl GraphAgentBuilder {
         compiled.interrupt_before = self.interrupt_before.into_iter().collect();
         compiled.interrupt_after = self.interrupt_after.into_iter().collect();
         compiled.recursion_limit = self.recursion_limit;
+        compiled.max_concurrency = self.max_concurrency;
         compiled.timeout_policies = self.timeout_policies;
         compiled.default_timeout = self.default_timeout;
         compiled.deferred_configs = self.deferred_configs;
