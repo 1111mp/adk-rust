@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **adk-server**: `agent_skills_from_index` bridges an `adk_skill::SkillIndex` to A2A
+  agent-card `skills[]` entries (skill name → `id` and `name`, description →
+  `description`, tags → `tags`, version folded into `tags` as `version:{v}`).
+  `ServerBuilder::with_skill_index` and `A2aServerBuilder::skill_index` attach an
+  index so the card served at `/.well-known/agent.json` includes those entries —
+  the surface Agent Registry keyword/prefix search indexes.
+  `A2aController::with_skill_index` is the underlying constructor.
 - **`POST /api/run` plain-JSON endpoint in `adk-server`.** Accepts the same body as
   `/api/run_sse`, runs the agent to completion, and returns the collected events as a
   JSON array — parity with Google ADK's `api_server` non-streaming `/run` route.
