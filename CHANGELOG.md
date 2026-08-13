@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **adk-gemini: cached content on Vertex AI.** `VertexBackend` implements the five
+  cached-content operations (create, get, update, list, delete) against the Vertex
+  REST endpoint `…/v1/projects/{project}/locations/{location}/cachedContents`,
+  including TTL refresh via `updateCachedContent` so the runner's cache-refresh
+  path works on Vertex. Studio-style model names (`models/{model}`) in create
+  payloads are normalized to full Vertex resource names. The Files API, batch
+  operations, and the Interactions API remain Studio-only on the Vertex backend.
 - **Telemetry to Google Cloud** (`adk-telemetry` feature `gcp`, umbrella
   `gcp-telemetry`, included in `gemini-agent-platform`). `init_with_gcp`
   exports traces to `https://telemetry.googleapis.com` with per-request
