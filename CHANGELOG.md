@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Example Store client** (`adk-tool`, feature `example-store`; umbrella
+  feature `example-store`, included in `gemini-agent-platform`):
+  `ExampleStoreClient` is an ADC-authenticated REST client for the Vertex AI
+  Example Store v1beta1 data plane (Preview, `us-central1` only) —
+  `upsert_examples`, `search_examples`, and `fetch_examples` against a
+  pre-provisioned `projects/*/locations/*/exampleStores/*` resource (no store
+  create/delete). `ExampleStoreProvider` packages top-k retrieval as a
+  `BeforeModelCallback` that injects the most similar stored examples into the
+  request preamble as dynamic few-shot instructions. New standalone example:
+  `examples/example_store/`.
 - **Vertex AI Memory Bank backend** (`adk-memory`, feature `vertex-memory`;
   umbrella feature `vertex-memory`, included in `gemini-agent-platform`):
   `VertexAiMemoryBankService` implements `MemoryService` over the platform's
