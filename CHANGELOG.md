@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OpenAI-compatible streaming usage** (`adk-model`): usage-only terminal
+  chunks with empty `choices` attach token counts to the final response.
 - **Span parenting across suspension points** (`adk-agent`, `adk-runner`): one
   logical invocation was exported as several disconnected traces. `LlmAgent`
   held a `call_llm` span guard across the `.await`/`yield` points of its
