@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Bounded partial streaming events** (`adk-agent`): incremental LLM events
+  no longer repeat the complete request and response payload on every chunk.
+  Terminal events retain the existing debug payload, while long histories now
+  incur constant payload overhead instead of growing with the chunk count.
 - **Text tool-call buffering** (`adk-model`): ordinary text that begins like a
   split tool-call prefix is released as soon as later chunks disambiguate it, so
   Markdown links and similar content do not remain buffered until stream end.
