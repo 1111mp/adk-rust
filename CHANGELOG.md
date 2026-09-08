@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Automatic progressive-skill guidance** (`adk-skill`, `adk-agent`):
+  `SkillToolset` now adds guidance for its currently available tools to each
+  model request through the new `Toolset::process_llm_request` hook. Guidance
+  is also applied to invocation-scoped toolsets.
 ### Fixed
 
 - **Open Responses argument identity** (`adk-model`): conflicting item or call

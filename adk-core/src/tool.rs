@@ -1,5 +1,6 @@
 use crate::{
-    CallbackContext, Event, EventActions, Memory, MemoryEntry, Result, RunConfig, Session,
+    CallbackContext, Event, EventActions, LlmRequest, Memory, MemoryEntry, ReadonlyContext, Result,
+    RunConfig, Session,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -317,6 +318,33 @@ pub trait Toolset: Send + Sync {
     fn name(&self) -> &str;
     /// Returns the tools available in this toolset for the given context.
     async fn tools(&self, ctx: Arc<dyn crate::ReadonlyContext>) -> Result<Vec<Arc<dyn Tool>>>;
+
+    /// Applies toolset-specific context to an LLM request before each model call.
+    ///
+    /// Toolsets can use this hook to describe a dynamic tool protocol without
+    /// requiring every agent that installs the toolset to repeat that guidance
+    /// in its instruction. The default implementation leaves the request
+    /// unchanged.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// async fn process_llm_request(
+    ///     &self,
+    ///     _ctx: std::sync::Arc<dyn adk_core::ReadonlyContext>,
+    ///     request: &mut adk_core::LlmRequest,
+    /// ) -> adk_core::Result<()> {
+    ///     request.contents.insert(0, adk_core::Content::new("user").with_text("Tool guidance"));
+    ///     Ok(())
+    /// }
+    /// ```
+    async fn process_llm_request(
+        &self,
+        _ctx: Arc<dyn ReadonlyContext>,
+        _request: &mut LlmRequest,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Controls how multiple tool calls from a single LLM response are dispatched.
