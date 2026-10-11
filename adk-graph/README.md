@@ -765,3 +765,9 @@ cargo run --manifest-path examples/cron_scheduling/Cargo.toml
 ## Part of ADK-Rust
 
 This crate is part of the [ADK-Rust](https://adk-rust.com) framework for building AI agents in Rust.
+
+## SQLx compatibility
+
+ADK-Rust 3.0 SQL database APIs use SQLx 0.9 pool and error types. Applications
+sharing pools must also use SQLx 0.9. See the [migration guide](../docs/official_docs/migration/sqlx-0.9.md)
+for runtime/TLS flags and migration-input requirements.
