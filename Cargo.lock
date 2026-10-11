@@ -743,6 +743,7 @@ dependencies = [
 name = "adk-payments"
 version = "3.0.0"
 dependencies = [
+ "adk-agent",
  "adk-artifact",
  "adk-auth",
  "adk-core",
@@ -752,6 +753,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "futures",
  "hex",
  "hmac 0.12.1",
  "http-body-util",
