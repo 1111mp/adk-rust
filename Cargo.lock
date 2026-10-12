@@ -240,6 +240,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "wiremock",
  "zeroize",
 ]
 
@@ -442,6 +443,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "url",
  "uuid 1.25.0",
 ]
 
