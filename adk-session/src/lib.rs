@@ -39,6 +39,9 @@
 /// SQL-backed approval stores for calls held for confirmation.
 pub mod approval;
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
+/// SQL-backed audit log stores for signed, Merkle-hashed audit logs.
+pub mod audit_log;
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
 mod durable_sql;
 /// Event types and the [`Events`] trait for accessing session event history.
 pub mod event;
@@ -129,6 +132,10 @@ pub use state_utils::{extract_state_deltas, merge_states};
 pub use approval::PostgresApprovalStore;
 #[cfg(feature = "sqlite")]
 pub use approval::SqliteApprovalStore;
+#[cfg(feature = "postgres")]
+pub use audit_log::PostgresAuditLogStore;
+#[cfg(feature = "sqlite")]
+pub use audit_log::SqliteAuditLogStore;
 #[cfg(feature = "firestore")]
 pub use firestore_stores::{FirestoreActionLedger, FirestoreApprovalStore, FirestoreSpendLedger};
 #[cfg(feature = "postgres")]
