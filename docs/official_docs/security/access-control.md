@@ -327,12 +327,30 @@ let events = FileAuditSink::verify_file("/archive/audit.jsonl", Some(key.as_slic
 inserted, reordered, or removed. A change to the newest line and lines cut from the end
 leave no broken link; record the newest line elsewhere to detect them.
 
+The chained file has one writer and a symmetric key. For logs that several replicas write,
+that a third party verifies with a public key, or that must detect truncation and rewrites,
+use the signed audit log (`signed-audit` feature): RFC 8785 records, an RFC 9162 Merkle tree,
+and Ed25519-signed checkpoints, stored in memory, SQLite, or PostgreSQL. `AuditLog` is itself
+an `AuditSink`. See [Audit Log](audit-log.md).
+
+| Sink | Integrity | Verifier needs | Writers |
+|------|-----------|----------------|---------|
+| `FileAuditSink::with_chaining` | SHA-256 chain | The file | One |
+| `FileAuditSink::with_hmac_chaining` | HMAC-SHA256 chain | The file and the secret key | One |
+| `signed_audit::AuditLog` | Chain, Merkle tree, signed checkpoints, optional anchors | The export and the public key | One per `log_id`, any number of replicas |
+
 ### Output Format (JSONL)
 
 ```json
 {"timestamp":"2025-01-01T10:30:00Z","user":"bob","session_id":"sess-123","event_type":"tool_access","resource":"search","outcome":"allowed"}
-{"timestamp":"2025-01-01T10:30:01Z","user":"bob","session_id":"sess-123","event_type":"tool_access","resource":"code_exec","outcome":"denied"}
+{"timestamp":"2025-01-01T10:30:01Z","user":"bob","session_id":"sess-123","event_type":"tool_access","resource":"code_exec","outcome":"denied","tenant_id":"acme","agent_id":"spiffe://acme.example/agent/billing","on_behalf_of":{"kind":"human","id":"bob"}}
 ```
+
+`ProtectedTool` and `ScopeGuard` record the calling agent on every decision:
+`AuditEvent::with_acting_context` sets `agent_id`, `on_behalf_of`, and, when unset, `tenant_id`
+from the tool context's acting context. `AuditFilter::agent_id` selects one agent's records, and
+the PostgreSQL and OTLP sinks store both fields (`migrate()` adds the PostgreSQL columns to an
+existing table). See [Agent Identity](agent-identity.md).
 
 ### Custom Audit Sink
 

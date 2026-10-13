@@ -96,6 +96,7 @@ dependencies = [
 name = "adk-agent"
 version = "3.0.0"
 dependencies = [
+ "adk-auth",
  "adk-core",
  "adk-devtools",
  "adk-guardrail",
@@ -212,6 +213,7 @@ dependencies = [
  "adk-server",
  "async-trait",
  "aws-config",
+ "aws-lc-rs",
  "aws-sdk-secretsmanager",
  "axum",
  "azure_core",
@@ -230,6 +232,7 @@ dependencies = [
  "opentelemetry_sdk",
  "proptest",
  "reqwest 0.12.28",
+ "ryu-js",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -237,6 +240,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "wiremock",
  "zeroize",
 ]
 
@@ -315,6 +319,7 @@ version = "3.0.0"
 dependencies = [
  "adk-agent",
  "adk-artifact",
+ "adk-auth",
  "adk-core",
  "adk-deploy",
  "adk-devtools",
@@ -427,15 +432,22 @@ dependencies = [
  "adk-core",
  "async-stream",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
+ "chrono-tz 0.10.4",
+ "cron",
  "futures",
+ "hmac 0.12.1",
  "proptest",
+ "reqwest 0.12.28",
  "rustls",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "url",
  "uuid 1.25.0",
 ]
 
@@ -482,6 +494,26 @@ dependencies = [
  "tokio",
  "tracing",
  "walkdir",
+]
+
+[[package]]
+name = "adk-durability-gates"
+version = "0.0.0"
+dependencies = [
+ "adk-agent",
+ "adk-core",
+ "adk-runner",
+ "adk-server",
+ "adk-session",
+ "async-trait",
+ "chrono",
+ "futures",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid 1.25.0",
 ]
 
 [[package]]
@@ -586,19 +618,25 @@ dependencies = [
  "adk-action",
  "adk-agent",
  "adk-core",
+ "adk-graph",
  "adk-rust-macros",
  "adk-tool",
  "async-stream",
  "async-trait",
  "blake3",
  "chrono",
+ "firestore",
  "fred",
  "futures",
+ "gcloud-sdk",
+ "mongodb",
+ "neo4rs",
  "proptest",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "similar",
  "sqlx",
  "thiserror 2.0.20",
@@ -990,6 +1028,7 @@ dependencies = [
  "adk-artifact",
  "adk-core",
  "adk-gcp",
+ "adk-graph",
  "adk-memory",
  "adk-runner",
  "adk-session",
@@ -1002,7 +1041,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
- "cron",
  "futures",
  "google-cloud-auth 1.15.0",
  "hex",

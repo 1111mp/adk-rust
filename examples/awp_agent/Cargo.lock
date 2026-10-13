@@ -64,13 +64,18 @@ name = "adk-core"
 version = "3.0.0"
 dependencies = [
  "async-trait",
+ "base64",
  "chrono",
  "futures",
+ "hmac",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

@@ -1,6 +1,6 @@
 # Autonomy Validation
 
-Live validation of the autonomy-readiness Phase 0 and Phase 1 fixes against OpenAI, Anthropic,
+Live validation of the autonomy-readiness Phase 0, Phase 1, and Phase 2 fixes against OpenAI, Anthropic,
 and Gemini. Each
 scenario drives real model calls through the public ADK APIs and asserts on observable facts —
 session history, tool execution counters, persisted state, checkpoints, and usage — never on model
@@ -33,12 +33,22 @@ retry is reported next to the result.
 | `team_budget_cap` | Run budgets, cost | A coordinator delegating to a researcher through an `AgentTool` under a 400 micro-USD `RunBudget`: the run ends with `ResourceExhausted` (`budget.cost`), every model call reported `UsageMetadata::cost`, no call started after the cumulative cost reached the cap, spend is at most the cap plus one call, and the tracker's counters match the reported costs |
 | `default_deny_policy` | Governed path | A `DeclarativePolicy` that allows only `lookup_order` and `refund` up to 50: `delete_account` and a refund of 500 run 0 times and are answered `denied by policy`, a refund of 20 runs once |
 | `approval_across_runs` | Governed path | Run 1 holds `send_invoice` for approval (0 executions, one pending entry in the `ApprovalStore`); an approver decides by fingerprint; run 2 re-issues the call under a new call ID, it runs once, and the decision is consumed |
+| `approval_service` | Approval service | Run 1 holds `send_invoice` and submits one request (quorum 2, group `finance`) to a `StoreApprovalService` over SQLite; the requester's own approval is refused; one approval keeps the call held through run 2; the second resolves it; run 3 resumes and executes it once, run 4 does not; notifications Submitted, Decided, Decided, Resolved |
 | `kill_switch` | Governed path | A tool freezes the runner's `GovernanceControl` mid-run: no later tool runs, the run ends with `governance.frozen`, and the next run is refused at its start |
-| `spend_ledger_daily_cap` | Spend ledger | One daily org cap covers model spend and payments: a one-cent checkout through the `adk-payments` tools, then runs until one is refused before its model call, then a second checkout refused by the `spend_limit` policy before it reaches the merchant; spend is split by vendor (provider and merchant) |
+| `spend_ledger_daily_cap` | Spend ledger | One daily org cap covers model spend and payments: a probe call's reservation is at least its cost (an upper bound), a one-cent checkout through the `adk-payments` tools, then runs (output capped at 2,048 tokens) until one is refused before its model call, then a checkout larger than the remaining room refused by the `spend_limit` policy before it reaches the merchant; total spend never exceeds the cap and is split by vendor (provider and merchant) |
 | `ap2_payment_governed` | AP2 governance | Two 12 USD AP2 payment mandates submitted by the model through `payments_ap2_payment_submit` under a 20 USD daily cap at the merchant: the first completes and commits 12 USD under `app / agent / merchant`, the second is refused by the `spend_limit` policy before the payment backend, and the payment audit trail records allowed then denied |
 | `openai_tools_routing` | Providers | `gpt-5.6-luna` with function tools on the Chat Completions client (`OpenAIClient`) completes a tool call (routed to the Responses API); `openai-chat` only |
 | `anthropic_thinking_replay` | Providers | `claude-haiku-4-5` with budget thinking, which thinks on every turn: two tool-use turns whose history replays signed thinking blocks are accepted; Anthropic only |
 | `builtin_tool_policy` | Built-in tools | A default-deny policy keeps the provider's web search tool (`OpenAIWebSearchTool`, Anthropic `WebSearchTool`, Gemini `GoogleSearchTool`) out of every request: no built-in use is reported and the model events carry a `policyDenied` withheld record. With `allow_read_only()` the tool is attached, the reported uses land in `UsageMetadata::builtin_tool_uses`, and `cost` equals the token cost plus the published fee; `openai-chat` is skipped |
+| `durable_crash_resume` | Durable worker | A `DurableWorker` is killed while the non-idempotent `charge_card` call is in flight; a second worker recovers the run after its lease expires, answers the unanswered call `outcome_unknown` from the SQLite action ledger, and completes the run on the same session: the card is charged once and the call has one response |
+| `audit_trail` | Signed audit log | A runner with `audit_log` over a SQLite `AuditLogStore` and a named default-deny policy: one turn makes an allowed `lookup_account`, a denied `delete_account`, and a `buy_credits` purchase through the `adk-payments` checkout tools. The log holds exactly tool_call allowed, denied, allowed, then a decision and an outcome for each payment step, each naming `urn:adk:agent:<app>/<agent>` acting for the user, and no record contains an argument. The exported log passes `adk-rust audit verify` (with `ADK_RUST_BIN` set; the library `verify` otherwise), and fails once the denial is edited |
+
+### Phase 2
+
+| Scenario | Area | Passes when |
+|----------|------|-------------|
+| `agent_identity` | Agent identity | Two deployments (`replica-a`, `replica-b`) of a billing agent configured with `Runner::builder().agent_principal(...)` call `lookup_invoice` under a policy that allows only `spiffe://autonomy.test/agent/billing` in tenant `acme`: every policy decision carries that agent id, the call executes, and all model spend is recorded under the agent id rather than the derived `urn:adk:agent:autonomy-identity/billing` |
+| `webhook_wakeup` | Wake-ups | `POST /hooks/{name}` on an `adk-server` with `webhook-ingress` and `background`, whose kill switch is mirrored from a shared governance store: a forged signature answers `401`; a freeze written by another replica answers `503` and enqueues nothing; after the unfreeze a Standard Webhooks delivery answers `202` and the server's embedded `DurableWorker` runs it to completion (the agent calls `file_ticket` once) acting for the hook's user as a `Service`; the captured delivery replayed and a sender retry re-signed under the same `webhook-id` both answer `200` with the same run; afterwards the store holds one run at attempt 1 and no further model call happened |
 
 ## Providers
 

@@ -40,6 +40,9 @@ pub struct ExecutionConfig {
     /// [`ExecutionConfig::with_parent_context`] to carry them through; leaving it
     /// unset is standalone mode and is what a graph invoked outside a `Runner` gets.
     pub parent_context: Option<Arc<dyn adk_core::InvocationContext>>,
+    /// When the run writes each super-step's checkpoint. Defaults to
+    /// [`Durability::Sync`](crate::checkpoint::Durability::Sync).
+    pub durability: crate::checkpoint::Durability,
 }
 
 impl ExecutionConfig {
@@ -52,7 +55,24 @@ impl ExecutionConfig {
             recursion_limit: 50,
             metadata: HashMap::new(),
             parent_context: None,
+            durability: crate::checkpoint::Durability::default(),
         }
+    }
+
+    /// Sets when the run writes each super-step's checkpoint.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use adk_graph::checkpoint::Durability;
+    /// use adk_graph::node::ExecutionConfig;
+    ///
+    /// let config = ExecutionConfig::new("thread").with_durability(Durability::Exit);
+    /// assert_eq!(config.durability, Durability::Exit);
+    /// ```
+    pub fn with_durability(mut self, durability: crate::checkpoint::Durability) -> Self {
+        self.durability = durability;
+        self
     }
 
     /// Carry the invocation this graph run belongs to into its nodes.
@@ -169,6 +189,17 @@ impl NodeContext {
 
     pub(crate) fn run_config(&self) -> Option<adk_core::RunConfig> {
         self.run_config.clone()
+    }
+
+    /// Who the run executing this node acts as, and for whom.
+    ///
+    /// `Some` when the graph runs with a [`RunConfig`](adk_core::RunConfig), such as a
+    /// graph agent under a runner, or a call to
+    /// [`CompiledGraph::invoke_with_run_config`](crate::CompiledGraph::invoke_with_run_config).
+    /// Agent nodes give their agents the resolved context through
+    /// [`ReadonlyContext::acting_context`](adk_core::ReadonlyContext::acting_context).
+    pub fn acting(&self) -> Option<&adk_core::ActingConfig> {
+        self.run_config.as_ref().map(|config| &config.acting)
     }
 
     pub(crate) fn child_invoker(&self) -> Option<std::sync::Arc<crate::child::ChildInvoker>> {
@@ -952,6 +983,10 @@ impl adk_core::ReadonlyContext for GraphInvocationContext {
 
     fn user_content(&self) -> &adk_core::Content {
         &self.user_content
+    }
+
+    fn acting_context(&self) -> adk_core::ActingContext {
+        self.run_config.acting_context_for(&self.app_name, self.agent.name(), &self.user_id)
     }
 }
 

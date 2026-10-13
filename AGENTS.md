@@ -326,10 +326,17 @@ adk-action/      Action node definitions (14 node types), StandardProperties, va
 adk-enterprise/  Enterprise client SDK — lightweight HTTP/SSE client for the ADK-Rust Enterprise
                  Managed Agent Service. Zero adk-* runtime dependencies. Agents, sessions,
                  streaming, vaults, memory. Self-hosted support. EXPERIMENTAL.
-adk-managed/     Managed agent runtime — provider-neutral agent execution engine with in-process
-                 checkpointing (state does not survive process loss). ManagedAgentRuntime trait, DefaultManagedAgentRuntime, declarative
-                 ManagedAgentDef, supervised session loop with checkpointing, custom tool
-                 parking, event replay, ScriptedLlm test double, golden fixture tests.
+adk-managed/     Managed agent runtime — provider-neutral agent execution engine.
+                 ManagedAgentRuntime trait, DefaultManagedAgentRuntime, declarative
+                 ManagedAgentDef, supervised session loop, event replay. Every turn runs
+                 under a DurableRunStore run; a turn waiting on a custom tool result or a
+                 tool confirmation parks its run until a store-enforced expiry, and the
+                 answer (ApprovalStore, or the approval service) wakes it on any runtime
+                 instance over the same ManagedStores. Session state survives process loss
+                 with a durable ManagedStateStore (SessionServiceStateStore over any session
+                 backend, FileManagedStateStore). DefaultModelResolver builds Gemini, OpenAI,
+                 Anthropic, Ollama, and OpenAI-compatible models under provider features.
+                 ScriptedLlm test double, golden fixture tests.
                  Feature-gated: `managed-runtime` on umbrella crate. EXPERIMENTAL.
 adk-deploy/      Deployment utilities
 adk-payments/    Payment integration: ACP commerce, AP2 alpha mandates, multi-actor flows
@@ -441,6 +448,7 @@ Graph capability features (forwarded to `adk-graph`, which has no default featur
 - `graph-time-travel` — step, fork and state history, in `full`
 - `graph-sqlite` — the SQLite checkpointer; needs a database, so not in `full`
 - `graph-redis-cache` — Redis-backed node cache; needs a server, so not in `full`
+- `graph-postgres`, `graph-redis`, `graph-mongodb`, `graph-neo4j`, `graph-firestore` — shared-database checkpointers; need a server, so not in `full`
 
 Production backend features (require external infrastructure, NOT included in `full`):
 - `postgres-session`, `redis-session`, `mongodb-session`, `firestore-session`, `neo4j-session`,
@@ -448,7 +456,7 @@ Production backend features (require external infrastructure, NOT included in `f
 - `sqlite-memory`, `database-memory`, `redis-memory`, `mongodb-memory`, `neo4j-memory`,
   `vertex-memory`
 - `auth-bridge`
-- `managed-runtime` — Managed agent runtime (adk-managed): durable sessions, event streaming, provider parity
+- `managed-runtime` — Managed agent runtime (adk-managed): durable sessions and parked tool calls, event streaming, provider parity; the `gemini`, `openai`, `anthropic` and `ollama` features also let its `DefaultModelResolver` build those providers
 
 Specialist opt-in features:
 - `yaml-agent`, `agent-registry` — YAML agent config and registry REST API
@@ -591,8 +599,9 @@ Five mechanisms for controlling tool execution, composable in any combination:
 1. **`ToolPolicy`** — run-wide allow / deny / require-approval decision per call, set with
    `Runner::builder().tool_policy(...)` or `RunConfig::tool_policy`. `DeclarativePolicy` matches
    rules in order on a tool-name glob, the tool's declared `ToolEffect`, and JSON-pointer argument
-   predicates (`equals`, `in_set`, `at_most`, `starts_with`, `domain_in`); a tool no rule permits
-   is **denied by default**.
+   predicates (`equals`, `in_set`, `at_most`, `starts_with`, `domain_in`), and the acting agent
+   (`for_agent` glob on its `AgentId`, `for_tenant`, `for_class`); a tool no rule permits is
+   **denied by default**.
 
 ```rust
 let policy = DeclarativePolicy::builder()
@@ -681,6 +690,21 @@ Evaluation order in `LlmAgent` (`adk-agent/src/llm_agent.rs`) and `CodeActAgent`
     (`after_tool_call`).
 
 A hook or callback that returns a value short-circuits the remaining callbacks of its kind.
+
+Every run has an acting agent (`ActingContext`, `ReadonlyContext::acting_context()`), resolved
+for the agent that is executing — root, transfer target, or workflow/team sub-agent — from
+`RunConfig::acting` (`ActingConfig::principals` by agent name), the runner's
+`identity_source(...)` (root: `principal_for` or `current`; others: `principal_for`), else
+`urn:adk:agent:{app}/{agent}`. The subject is always the session's user as
+`ActingConfig::subject_kind` (`Human` by default, `Service` for scheduler, webhook, and queue
+runs); a run asking to act for anyone else fails with `identity.subject_mismatch` unless the
+runner's `subject_delegation(...)` policy allows it. `ActingContext` carries no invocation id —
+the execution identity's is the only one. `ToolPolicyRequest::acting`,
+`ToolConfirmationRequest::acting`, `SpendKey::agent`, and `adk_auth::AuditEvent::agent_id` carry
+it; `AgentTool` delegation appends the caller to the delegate's `delegation_chain`. Context
+wrappers must forward `acting_context()`. `DurableWorker` honours a run's stored principal only
+for agent ids in `DurableWorkerConfig::allowed_principals`. See
+`docs/official_docs/security/agent-identity.md`.
 
 See `docs/official_docs/security/tool-authorization.md` for full documentation with CLI and web server examples.
 

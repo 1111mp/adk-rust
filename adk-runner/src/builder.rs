@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "artifacts")]
 use adk_artifact::ArtifactService;
+use adk_core::audit_log::{AuditFailureMode, AuditRecorder, AuditTrail};
 use adk_core::{
     ActionLedger, Agent, ApprovalStore, CacheCapable, ContextCacheConfig, GovernanceControl,
     Memory, Result, RunBudget, RunConfig, SpendLedger, ToolPolicy,
@@ -81,6 +82,11 @@ pub struct RunnerConfigBuilder<A, G, S> {
     action_ledger: Option<Arc<dyn ActionLedger>>,
     approval_store: Option<Arc<dyn ApprovalStore>>,
     spend_ledger: Option<Arc<dyn SpendLedger>>,
+    durable_runs: Option<Arc<dyn adk_core::DurableRunStore>>,
+    audit_recorder: Option<Arc<dyn AuditRecorder>>,
+    audit_failure_mode: AuditFailureMode,
+    identity_source: Option<Arc<dyn adk_core::IdentitySource>>,
+    subject_delegation: Option<Arc<dyn adk_core::SubjectDelegationPolicy>>,
     _marker: PhantomData<(A, G, S)>,
 }
 
@@ -112,6 +118,11 @@ impl RunnerConfigBuilder<NoAppName, NoAgent, NoSessionService> {
             action_ledger: None,
             approval_store: None,
             spend_ledger: None,
+            durable_runs: None,
+            audit_recorder: None,
+            audit_failure_mode: AuditFailureMode::Block,
+            identity_source: None,
+            subject_delegation: None,
             _marker: PhantomData,
         }
     }
@@ -155,6 +166,11 @@ impl<A, G, S> RunnerConfigBuilder<A, G, S> {
             action_ledger: self.action_ledger,
             approval_store: self.approval_store,
             spend_ledger: self.spend_ledger,
+            durable_runs: self.durable_runs,
+            audit_recorder: self.audit_recorder,
+            audit_failure_mode: self.audit_failure_mode,
+            identity_source: self.identity_source,
+            subject_delegation: self.subject_delegation,
             _marker: PhantomData,
         }
     }
@@ -186,6 +202,11 @@ impl<A, G, S> RunnerConfigBuilder<A, G, S> {
             action_ledger: self.action_ledger,
             approval_store: self.approval_store,
             spend_ledger: self.spend_ledger,
+            durable_runs: self.durable_runs,
+            audit_recorder: self.audit_recorder,
+            audit_failure_mode: self.audit_failure_mode,
+            identity_source: self.identity_source,
+            subject_delegation: self.subject_delegation,
             _marker: PhantomData,
         }
     }
@@ -220,6 +241,11 @@ impl<A, G, S> RunnerConfigBuilder<A, G, S> {
             action_ledger: self.action_ledger,
             approval_store: self.approval_store,
             spend_ledger: self.spend_ledger,
+            durable_runs: self.durable_runs,
+            audit_recorder: self.audit_recorder,
+            audit_failure_mode: self.audit_failure_mode,
+            identity_source: self.identity_source,
+            subject_delegation: self.subject_delegation,
             _marker: PhantomData,
         }
     }
@@ -407,6 +433,130 @@ impl<A, G, S> RunnerConfigBuilder<A, G, S> {
         self
     }
 
+    /// Set the durable run queue shared by every replica (optional).
+    ///
+    /// [`Runner::interrupt`](crate::Runner::interrupt) then also requests cancellation of
+    /// the session's unfinished durable runs, wherever their worker runs.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let runner = Runner::builder()
+    ///     .app_name("ops")
+    ///     .agent(agent)
+    ///     .session_service(sessions)
+    ///     .durable_run_store(Arc::new(adk_core::InMemoryRunStore::new()))
+    ///     .build()?;
+    /// ```
+    pub fn durable_run_store(mut self, store: Arc<dyn adk_core::DurableRunStore>) -> Self {
+        self.durable_runs = Some(store);
+        self
+    }
+
+    /// Record the runner's governed actions in `recorder` (optional).
+    ///
+    /// Every run records each tool decision (allowed, denied, held for approval), each
+    /// approval decision, each payment made through the payment tools, and each call
+    /// answered with an unknown outcome; the runner's kill switch records freezes and
+    /// unfreezes. Records name the acting agent and the subject it acts for, and carry
+    /// argument digests, never arguments. An action whose record cannot be written does
+    /// not happen; see [`audit_failure_mode`](Self::audit_failure_mode).
+    ///
+    /// The runner installs the trail on each run's [`RunConfig::audit`] when the run does
+    /// not carry one.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use adk_auth::signed_audit::{AuditLog, Ed25519Signer};
+    ///
+    /// let log = AuditLog::builder(store, "replica-1", signer).open().await?;
+    /// let runner = Runner::builder()
+    ///     .app_name("ops")
+    ///     .agent(agent)
+    ///     .session_service(sessions)
+    ///     .audit_log(Arc::new(log))
+    ///     .build()?;
+    /// ```
+    pub fn audit_log(mut self, recorder: Arc<dyn AuditRecorder>) -> Self {
+        self.audit_recorder = Some(recorder);
+        self
+    }
+
+    /// Set what happens when the [`audit_log`](Self::audit_log) cannot record an action
+    /// (optional). The default, [`AuditFailureMode::Block`], refuses the action.
+    pub fn audit_failure_mode(mut self, mode: AuditFailureMode) -> Self {
+        self.audit_failure_mode = mode;
+        self
+    }
+
+    /// Sets where each run's agent principals come from.
+    ///
+    /// The runner reads the source at the start of every run: the root agent acts as
+    /// [`principal_for`](adk_core::IdentitySource::principal_for) its name, falling back
+    /// to [`current`](adk_core::IdentitySource::current), and every other agent in the
+    /// tree acts as `principal_for` its name, falling back to
+    /// `urn:adk:agent:{app_name}/{agent_name}`. A principal the run's
+    /// [`RunConfig::acting`] names for an agent takes precedence. A run whose source fails
+    /// ends with the source's error before any agent runs.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use adk_core::{AgentId, AgentPrincipal, StaticIdentitySource};
+    ///
+    /// let source = StaticIdentitySource::new(
+    ///     AgentPrincipal::new(AgentId::new("spiffe://acme.example/agent/billing")?)
+    ///         .with_instance(std::env::var("HOSTNAME")?),
+    /// );
+    /// let runner = Runner::builder()
+    ///     .app_name("billing")
+    ///     .agent(agent)
+    ///     .session_service(sessions)
+    ///     .identity_source(Arc::new(source))
+    ///     .build()?;
+    /// ```
+    pub fn identity_source(mut self, source: Arc<dyn adk_core::IdentitySource>) -> Self {
+        self.identity_source = Some(source);
+        self
+    }
+
+    /// Sets a fixed principal the root agent acts as.
+    ///
+    /// Shorthand for [`identity_source`](Self::identity_source) with a
+    /// [`StaticIdentitySource`](adk_core::StaticIdentitySource); sub-agents act as their
+    /// derived ids.
+    pub fn agent_principal(self, principal: adk_core::AgentPrincipal) -> Self {
+        self.identity_source(Arc::new(adk_core::StaticIdentitySource::new(principal)))
+    }
+
+    /// Sets which runs may act for a subject other than their session's user.
+    ///
+    /// Without a policy, a run whose [`RunConfig::acting`] asks to act for anyone but the
+    /// session's user is refused with `identity.subject_mismatch` before any agent runs.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use adk_core::{StaticSubjectDelegation, SubjectRef};
+    ///
+    /// let runner = Runner::builder()
+    ///     .app_name("crm")
+    ///     .agent(agent)
+    ///     .session_service(sessions)
+    ///     .subject_delegation(Arc::new(
+    ///         StaticSubjectDelegation::new().allow_any(SubjectRef::service("crm-sync")),
+    ///     ))
+    ///     .build()?;
+    /// ```
+    pub fn subject_delegation(
+        mut self,
+        policy: Arc<dyn adk_core::SubjectDelegationPolicy>,
+    ) -> Self {
+        self.subject_delegation = Some(policy);
+        self
+    }
+
     /// Set the context compaction configuration for token-budget overflow handling (optional).
     ///
     /// When configured, the runner applies the given [`CompactionStrategy`](crate::compaction::CompactionStrategy)
@@ -454,6 +604,12 @@ impl RunnerConfigBuilder<HasAppName, HasAgent, HasSessionService> {
             action_ledger: self.action_ledger,
             approval_store: self.approval_store,
             spend_ledger: self.spend_ledger,
+            durable_runs: self.durable_runs,
+            audit: self.audit_recorder.map(|recorder| {
+                AuditTrail::new(recorder).with_failure_mode(self.audit_failure_mode)
+            }),
+            identity_source: self.identity_source,
+            subject_delegation: self.subject_delegation,
         }
     }
 
@@ -493,6 +649,12 @@ impl RunnerConfigBuilder<HasAppName, HasAgent, HasSessionService> {
             action_ledger: self.action_ledger,
             approval_store: self.approval_store,
             spend_ledger: self.spend_ledger,
+            durable_runs: self.durable_runs,
+            audit: self.audit_recorder.map(|recorder| {
+                AuditTrail::new(recorder).with_failure_mode(self.audit_failure_mode)
+            }),
+            identity_source: self.identity_source,
+            subject_delegation: self.subject_delegation,
         };
         Runner::new(config)
     }

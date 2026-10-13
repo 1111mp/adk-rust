@@ -262,12 +262,18 @@ fn run_codeact(input: LoopInputs) -> impl Stream<Item = adk_core::Result<Event>>
         let model_ctx: Arc<dyn CallbackContext> = invocation_ctx.clone();
         // Shared with every agent in the invocation through the run config.
         let budget_tracker = invocation_ctx.run_config().budget_tracker.clone();
+        // Model calls reserve their upper-bound cost and count against the run budget.
+        let model_scope = adk_core::ModelCallScope::for_run(
+            invocation_ctx.run_config(),
+            invocation_ctx.app_name(),
+            invocation_ctx.agent_name(),
+        );
         let model_hooks = ModelHooks {
             before: before_model_callbacks.as_slice(),
             after: after_model_callbacks.as_slice(),
             hooks: &hook_callbacks,
             ctx: &model_ctx,
-            budget: budget_tracker.as_ref(),
+            scope: &model_scope,
             #[cfg(feature = "enhanced-plugins")]
             plugins: enhanced_plugin_manager.as_deref(),
         };
@@ -979,7 +985,7 @@ async fn run_authorized_tool(
     // answer is raised into the script, so the code sees that the call did not run.
     let effect = tool.effect();
     let ledgered = match crate::tool_ledger::begin_ledgered_call(
-        invocation_ctx.run_config(),
+        invocation_ctx.as_ref(),
         effect,
         tool_ctx.idempotency_key(),
         &name,
@@ -987,8 +993,9 @@ async fn run_authorized_tool(
     )
     .await
     {
-        Ok(ledgered) => ledgered,
-        Err(answer) => return Ok(ToolRun::Finished(Err(render_value(&answer)))),
+        Ok(Ok(ledgered)) => ledgered,
+        Ok(Err(answer)) => return Ok(ToolRun::Finished(Err(render_value(&answer)))),
+        Err(error) => return Ok(ToolRun::Abort(error)),
     };
 
     // Only a call that cannot repeat a side effect is retried, and only after a
@@ -1055,6 +1062,17 @@ async fn run_authorized_tool(
     }
 
     let outcome_unknown = interrupted && effect == ToolEffect::NonIdempotent;
+    if outcome_unknown
+        && let Err(error) = crate::tool_ledger::record_outcome_unknown(
+            invocation_ctx.as_ref(),
+            &name,
+            &args,
+            "interrupted",
+        )
+        .await
+    {
+        return Ok(ToolRun::Abort(error));
+    }
     // A call that ended mid-flight keeps its begun record, so a replay is answered
     // with an unknown outcome instead of executing again.
     if let Some(ledgered) = ledgered
@@ -1318,6 +1336,7 @@ fn suspend_event(invocation_id: &str, agent_name: &str, cp: &CodeActCheckpoint) 
                 tool_name: cp.call.tool.clone(),
                 function_call_id: Some(cp.call.call_id.to_string()),
                 args: cp.call.args.clone(),
+                acting: None,
             });
             // Mark the turn as interrupted and carry a human-readable prompt,
             // mirroring LlmAgent's confirmation interrupt event.
@@ -1406,8 +1425,8 @@ struct ModelHooks<'a> {
     /// The run's invocation hooks, iterated ahead of `before` and `after`.
     hooks: &'a HookCallbacks,
     ctx: &'a Arc<dyn CallbackContext>,
-    /// The run budget model calls count against.
-    budget: Option<&'a Arc<adk_core::BudgetTracker>>,
+    /// The run budget and spend ledger model calls count against.
+    scope: &'a adk_core::ModelCallScope,
     #[cfg(feature = "enhanced-plugins")]
     plugins: Option<&'a EnhancedPluginManager>,
 }
@@ -1454,8 +1473,7 @@ async fn next_script(
     }
 
     if content.is_none() {
-        let mut stream =
-            adk_core::generate_with_budget(model, request, false, hooks.budget).await?;
+        let mut stream = hooks.scope.generate(model, request, false).await?;
         let mut text = String::new();
         while let Some(chunk) = stream.next().await {
             if let Some(c) = chunk?.content {
@@ -1865,6 +1883,8 @@ impl Agent for CodeActAgent {
     }
 
     async fn run(&self, ctx: Arc<dyn InvocationContext>) -> adk_core::Result<EventStream> {
+        // Under a workflow or team parent, the agent still acts as itself.
+        let ctx = crate::acting_agent_context::ActingAgentContext::scope(ctx, self.name());
         // Input guardrails run first; a block aborts the run, a transform
         // (e.g. PII redaction) rewrites the user content downstream.
         let ctx = self.apply_input_guardrails(ctx).await?;
@@ -2763,6 +2783,10 @@ impl ReadonlyContext for CodeToolContext {
     fn user_content(&self) -> &Content {
         self.inner.user_content()
     }
+
+    fn acting_context(&self) -> adk_core::ActingContext {
+        self.inner.acting_context()
+    }
 }
 
 #[async_trait]
@@ -2882,6 +2906,10 @@ impl ReadonlyContext for ToolOutcomeContext {
     }
     fn user_content(&self) -> &Content {
         self.inner.user_content()
+    }
+
+    fn acting_context(&self) -> adk_core::ActingContext {
+        self.inner.acting_context()
     }
 }
 

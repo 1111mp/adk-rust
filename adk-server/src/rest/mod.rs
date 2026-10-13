@@ -560,6 +560,8 @@ pub struct ServerBuilder {
     background_state: Option<crate::background::BackgroundState>,
     #[cfg(feature = "background")]
     cron_state: Option<crate::background::CronState>,
+    #[cfg(feature = "webhook-ingress")]
+    webhook_ingress: Option<crate::webhooks::WebhookIngress>,
 }
 
 impl ServerBuilder {
@@ -580,6 +582,8 @@ impl ServerBuilder {
             background_state: None,
             #[cfg(feature = "background")]
             cron_state: None,
+            #[cfg(feature = "webhook-ingress")]
+            webhook_ingress: None,
         }
     }
 
@@ -669,9 +673,12 @@ impl ServerBuilder {
 
     /// Mount the background run endpoints under `/api`, behind the auth middleware.
     ///
-    /// Serves `POST /api/runs`, `GET /api/runs/{run_id}`, and
-    /// `DELETE /api/runs/{run_id}` from `state`. When a `RequestContextExtractor`
-    /// is configured, every request must authenticate. Mounting
+    /// Serves `POST /api/runs`, `GET /api/runs`, `GET /api/runs/{run_id}`, and
+    /// `DELETE /api/runs/{run_id}` from `state`, and starts its embedded worker when the
+    /// router is built inside a Tokio runtime. The state obeys
+    /// [`ServerConfig::governance`] unless it carries its own control. When a
+    /// `RequestContextExtractor` is configured, every request must authenticate, and an
+    /// authenticated run belongs to the caller's user id. Mounting
     /// [`background_runs_router_with_state`](crate::background::background_runs_router_with_state)
     /// yourself skips that layer.
     ///
@@ -695,7 +702,7 @@ impl ServerBuilder {
     /// Serves `POST /api/cron`, `GET /api/cron`, and `GET`/`PATCH`/`DELETE
     /// /api/cron/{job_id}` from `state`. The scheduler is not started here — call
     /// [`start_cron_scheduler`](crate::background::start_cron_scheduler) with a
-    /// clone of the same state.
+    /// clone of the same state on every replica; each fire time is enqueued once.
     ///
     /// # Example
     ///
@@ -709,6 +716,29 @@ impl ServerBuilder {
     #[cfg(feature = "background")]
     pub fn with_cron_jobs(mut self, state: crate::background::CronState) -> Self {
         self.cron_state = Some(state);
+        self
+    }
+
+    /// Mount `POST /hooks/{name}`: each signed delivery enqueues a durable run.
+    ///
+    /// The route is served at the root, outside `/api` and without the auth middleware:
+    /// the Standard Webhooks signature is the authentication. When `ingress` has no kill
+    /// switch of its own, [`ServerConfig::governance`] is installed, so a freeze refuses
+    /// deliveries with `503`. Runs execute when a worker claims them from the ingress's
+    /// run store.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use adk_server::webhooks::{WebhookHook, WebhookIngress};
+    ///
+    /// let ingress = WebhookIngress::new(run_store.clone())
+    ///     .with_hook(WebhookHook::new("billing", verifier, "billing", "invoice_agent"));
+    /// let app = ServerBuilder::new(config).with_webhook_ingress(ingress).build();
+    /// ```
+    #[cfg(feature = "webhook-ingress")]
+    pub fn with_webhook_ingress(mut self, ingress: crate::webhooks::WebhookIngress) -> Self {
+        self.webhook_ingress = Some(ingress);
         self
     }
 
@@ -753,9 +783,9 @@ impl ServerBuilder {
     ///
     /// | Route | Effect |
     /// |-------|--------|
-    /// | `POST /api/admin/freeze` | Freezes [`ServerConfig::governance`], failing new runs and stopping running ones before their next model or tool call; pauses background-run and cron scheduling mounted on this builder. Body: `{"reason": "..."}` |
-    /// | `POST /api/admin/unfreeze` | Lifts the freeze and resumes scheduling |
-    /// | `GET /api/admin/governance` | Reports `{"frozen": bool, "reason": ...}` |
+    /// | `POST /api/admin/freeze` | Freezes [`ServerConfig::governance`], failing new runs and stopping running ones before their next model or tool call; background workers stop claiming and schedules stop firing; running durable runs are asked to cancel. A mirrored control writes the freeze to the shared store, so it reaches every replica. Body: `{"reason": "..."}` |
+    /// | `POST /api/admin/unfreeze` | Lifts the freeze |
+    /// | `GET /api/admin/governance` | Reports `{"frozen", "reason", "mirrored", "stale"}` |
     ///
     /// The endpoints carry the same authentication as every other mutation surface. Without
     /// a `RequestContextExtractor` they are open to anyone who reaches the server, so enable
@@ -769,6 +799,26 @@ impl ServerBuilder {
     pub fn enable_governance_endpoints(mut self) -> Self {
         self.governance_endpoints = true;
         self
+    }
+
+    /// Mount the approval inbox endpoints for `service` under `/api/approvals`, behind
+    /// the auth middleware. See [`crate::approvals`] for the routes.
+    ///
+    /// The endpoints need an authenticated caller, so configure a
+    /// `RequestContextExtractor`; without one every route answers `401`. Run
+    /// [`spawn_approval_ticker`](crate::approvals::spawn_approval_ticker) as well so
+    /// requests expire and escalate.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let app = ServerBuilder::new(config).with_approval_service(service).build();
+    /// ```
+    #[cfg(feature = "approvals")]
+    pub fn with_approval_service(self, service: Arc<dyn adk_core::ApprovalService>) -> Self {
+        self.add_api_routes(crate::approvals::approvals_router(
+            crate::approvals::ApprovalEndpoints::new(service),
+        ))
     }
 
     /// Build the final Axum router with all routes and middleware applied.
@@ -931,23 +981,26 @@ impl ServerBuilder {
             api_router = api_router.merge(custom_routes.layer(auth_layer.clone()));
         }
 
-        // The kill switch pauses the scheduling mounted here, so its controller is built
-        // before the background and cron states move into their routers.
+        // Background runs and cron schedules obey the server's kill switch unless they
+        // carry their own, and a freeze asks their running runs to cancel.
+        #[cfg(feature = "background")]
+        let mut background_run_stores: Vec<Arc<dyn adk_core::DurableRunStore>> = Vec::new();
+        #[cfg(feature = "background")]
+        for state in self
+            .background_state
+            .iter()
+            .chain(self.cron_state.iter().map(|cron| &cron.background_state))
+        {
+            state.governance_or(&config.governance);
+            background_run_stores.push(Arc::clone(state.run_store()));
+        }
+
         if self.governance_endpoints {
             let controller = controllers::GovernanceController::new(config.governance.clone());
             #[cfg(feature = "background")]
-            let controller = {
-                let mut controller = controller;
-                if let Some(state) = &self.background_state {
-                    controller = controller.with_background_runner(state.runner.clone());
-                }
-                if let Some(state) = &self.cron_state {
-                    controller = controller
-                        .with_background_runner(state.background_state.runner.clone())
-                        .with_cron_store(state.cron_store.clone());
-                }
-                controller
-            };
+            let controller = background_run_stores
+                .iter()
+                .fold(controller, |controller, store| controller.with_run_store(Arc::clone(store)));
             api_router = api_router.merge(
                 Router::new()
                     .route("/admin/freeze", post(controllers::governance::freeze))
@@ -995,6 +1048,16 @@ impl ServerBuilder {
             .route("/ui/{*path}", get(web_ui::serve_ui_assets));
 
         let mut app = Router::new().nest("/api", api_router).merge(ui_router);
+
+        #[cfg(feature = "webhook-ingress")]
+        if let Some(ingress) = self.webhook_ingress {
+            let ingress = if ingress.has_governance() {
+                ingress
+            } else {
+                ingress.with_governance(config.governance.clone())
+            };
+            app = app.merge(crate::webhooks::webhook_ingress_router(ingress));
+        }
 
         // Merge custom root routes
         for custom_routes in self.root_routes {

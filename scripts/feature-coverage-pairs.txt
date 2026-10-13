@@ -35,15 +35,24 @@
 # The background run store and its persistence are behind `background`; nothing compiled
 # them when durable run records were added.
 2 adk-server background
+# The multi-process durability gates on SQLite (crash, schedules, stalled worker, kill
+# switch); the server backends run nightly. Shares the `background` build above.
+2 adk-durability-gates sqlite
+# Approval inbox endpoints and the signed approval webhook notifier.
+2 adk-server approvals
 # Agent Engine dispatch surface; its wire-fixture and dispatch tests need the feature.
 2 adk-server agent-engine
 2 adk-server vertex-remote-engine
 # 11 clippy failures had accumulated unseen behind `a2a-v1`.
 2 adk-server a2a-v1
+# Signed inbound webhooks: `POST /hooks/{name}` and its idempotent run-store enqueue.
+2 adk-server webhook-ingress,background
 2 adk-cli vertex-agent-registry
 2 adk-cli vertex-skill-registry
 # The `deploy agent-engine` subcommand: arg-parse and mock create-contract tests.
 2 adk-cli gcp-deploy
+# `audit export` from SQLite and PostgreSQL audit stores.
+2 adk-cli audit-sql
 
 # Shard 3 — adk-graph, adk-managed, adk-code.
 # No workspace member enables these four; four clippy failures and two uncompilable doc
@@ -53,10 +62,15 @@
 3 adk-graph sqlite
 3 adk-graph node-cache
 3 adk-graph delta-checkpoint
+# Checkpointers for shared databases: compiles them and runs the in-process conformance
+# suites; the live-server suites run in the nightly `durable-stores` job.
+3 adk-graph postgres,redis,mongodb,neo4j,firestore
 # Two entries on purpose: `memory` alone left `sandbox` unbuilt, and a renamed
 # EnforcedLimits field kept its old name at a call site for two releases.
 3 adk-managed memory
 3 adk-managed full
+# `DefaultModelResolver` constructs each provider only under its feature.
+3 adk-managed all-providers
 # The Monty Python executors and the Agent Engine sandbox client are both gated.
 3 adk-code embedded-python
 3 adk-code vertex-sandbox
@@ -104,6 +118,8 @@
 # adk-auth's SSO/OAuth surface drifted out of the clippy gate; a jsonwebtoken major bump
 # broke it while every required check stayed green.
 6 adk-auth sso
+# Signed audit log: JCS, RFC 9162 proofs, signed-note checkpoints, tamper tests.
+6 adk-auth signed-audit
 # The GCS artifact backend must keep blob-name parity with adk-python.
 6 adk-artifact gcs
 6 adk-telemetry gcp
@@ -123,3 +139,4 @@
 # SQLx 0.9: independently compile backends hidden by default workspace builds.
 6 adk-auth postgres-audit
 5 adk-memory graph-memory
+6 adk-auth token-exchange

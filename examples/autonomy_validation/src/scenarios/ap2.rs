@@ -265,10 +265,10 @@ async fn scenario(cfg: &Config, provider: Provider) -> anyhow::Result<Verdict> {
         Arc::new(ArtifactBackedEvidenceStore::new(Arc::new(InMemoryArtifactService::new())));
     let merchant =
         Arc::new(Merchant { transactions: transactions.clone(), payments: Mutex::new(Vec::new()) });
-    let ledger = Arc::new(InMemorySpendLedger::new(SpendLimits::new().limit(
-        SpendKey::org(APP).with_vendor(MERCHANT).per(SpendPeriod::Day),
-        CAP_MICRO_USD,
-    )));
+    let ledger = Arc::new(InMemorySpendLedger::new(
+        SpendLimits::new()
+            .limit(SpendKey::org(APP).with_vendor(MERCHANT).per(SpendPeriod::Day), CAP_MICRO_USD),
+    ));
     let audit = Arc::new(AuditLog::default());
     // Signature checks are out of scope here; the verifier tests cover them.
     let adapter = Arc::new(
@@ -286,9 +286,8 @@ async fn scenario(cfg: &Config, provider: Provider) -> anyhow::Result<Verdict> {
         .with_scope_guard(ScopeGuard::new(StaticScopeResolver::new(vec![PAYMENT_EXECUTE_SCOPE])))
         .build()
         .tools();
-    let mut builder = LlmAgentBuilder::new(AGENT)
-        .model(model as Arc<dyn Llm>)
-        .instruction(format!(
+    let mut builder =
+        LlmAgentBuilder::new(AGENT).model(model as Arc<dyn Llm>).instruction(format!(
             "You submit AP2 payment mandates. When asked to pay a transaction, call {TOOL} \
              exactly once with the given transactionId and the given paymentMandate object, \
              copied verbatim. Never call {TOOL} a second time for the same transaction; if it \
@@ -355,7 +354,12 @@ async fn scenario(cfg: &Config, provider: Provider) -> anyhow::Result<Verdict> {
         return Ok(Verdict::Fail(format!("the payment backend executed {payments:?}")));
     }
     let spent = ledger
-        .spent(&SpendKey::org(APP).with_agent(AGENT).with_vendor(MERCHANT), SpendPeriod::Day)
+        .spent(
+            &SpendKey::org(APP)
+                .with_agent(adk_core::AgentPrincipal::derived(APP, AGENT).id.as_str())
+                .with_vendor(MERCHANT),
+            SpendPeriod::Day,
+        )
         .await?;
     if spent != CART_MICRO_USD {
         return Ok(Verdict::Fail(format!(

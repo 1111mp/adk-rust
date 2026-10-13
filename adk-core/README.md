@@ -305,6 +305,7 @@ rewrites and immediately before `Tool::execute`:
 | Policy | `ToolPolicy`, `DeclarativePolicy` | Allow, deny, or require approval; `DeclarativePolicy` denies unlisted tools |
 | Screen | `ToolCallScreen` | The agent's guardrails; a rewrite is checked against the policy again |
 | Confirmation | `ToolApproval`, `ApprovalStore` | Decisions bind to the call's fingerprint, so they survive a re-issued call ID |
+| Approval service | `ApprovalService`, `StoreApprovalService`, `ApprovalPolicy` | An inbox over the approval store: quorum, delegation, escalation, expiry, and edit / reject / respond actions with compare-and-swap decisions |
 
 ```rust
 use adk_core::{ArgPredicate, DeclarativePolicy, PolicyDecision, PolicyRule, ToolPolicyRequest};
@@ -329,11 +330,11 @@ budget, and in `UsageMetadata::cost`.
 ### Store Conformance Suites
 
 The `conformance` feature provides one suite per durable store trait — `SpendLedger`,
-`ActionLedger`, and `ApprovalStore`. A backend implements a harness that opens it and calls
-`spend_ledger_conformance_tests!`, `action_ledger_conformance_tests!`, or
-`approval_store_conformance_tests!`, which generate one `#[tokio::test]` per contract case:
-accounting, period rollover, concurrency across two handles, and restart survival. Every
-in-memory and `adk-session` backend runs the same suites.
+`ActionLedger`, `ApprovalStore`, `LeaseStore`, `DurableRunStore`, `ScheduleStore`, and
+`GovernanceStateStore`. A backend implements a harness that opens it and calls the matching
+`*_conformance_tests!` macro, which generates one `#[tokio::test]` per contract case:
+accounting, period rollover, fencing, single-winner concurrency across two handles, and
+restart survival. Every in-memory and `adk-session` backend runs the same suites.
 
 ```toml
 [dev-dependencies]
@@ -364,6 +365,10 @@ Unsettled holds expire after a TTL. `InMemorySpendLedger` is the process-local
 implementation; `adk-session` provides SQLite, PostgreSQL, Redis, MongoDB, Neo4j, and
 Firestore ledgers. Set `RunConfig::spend_ledger` to cap a run. `with_clock` takes a
 `Clock`; `ManualClock` lets a test cross a day or month boundary.
+
+`ModelCallScope` applies the run budget and the spend ledger to model calls made outside
+an agent's own loop — compaction summaries, LLM routing, MCP sampling. `generate_metered`
+and `MeteredLlm` meter against the scope made current with `ModelCallScope::within`.
 
 ```rust
 use adk_core::{InMemorySpendLedger, SpendKey, SpendLimits, SpendPeriod};
@@ -439,6 +444,53 @@ pub enum StreamingMode {
     Bidi,  // Bidirectional (realtime)
 }
 ```
+
+## Durable Runtime Contracts
+
+Backend-neutral traits for running agents durably across replicas, each with an in-memory
+implementation that takes a `Clock` through `with_clock`:
+
+| Trait | In-memory | Holds |
+|-------|-----------|-------|
+| `LeaseStore` | `InMemoryLeaseStore` | Leases with fencing epochs |
+| `DurableRunStore` | `InMemoryRunStore` | The run queue: claims, heartbeats, waits, retries, cancellation |
+| `ScheduleStore` | `InMemoryScheduleStore` | Cron, one-shot, and interval schedules with a revision CAS |
+| `GovernanceStateStore` | `InMemoryGovernanceStateStore` | Freeze state per organisation, tenant, and agent |
+
+`AgentId`, `AgentPrincipal`, and `ActingContext` (module `principal`) identify the agent a
+run acts as; `ActingConfig` (module `acting`, on `RunConfig::acting`) resolves it per agent and
+pins the subject to the session's user, and `NewRun::with_service_subject` marks a scheduled,
+webhook, or queue run as acting for a service. `schedule::plan_fires` computes fire times; cron specs need the `cron` feature.
+
+```rust
+use std::time::Duration;
+
+use adk_core::{DurableRunStore, InMemoryRunStore, NewRun, RunOutcome};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> adk_core::Result<()> {
+    let runs = InMemoryRunStore::new();
+    runs.enqueue(NewRun::new("default", "app", "user", "agent", json!({}))).await?;
+    let claimed = runs.claim("default", "worker-1", Duration::from_secs(30)).await?.unwrap();
+    let done = runs
+        .finish(&claimed.record.run_id, claimed.epoch, RunOutcome::Completed(json!("ok")))
+        .await?;
+    assert!(done.state.is_terminal());
+    Ok(())
+}
+```
+
+## Wake-ups and Webhooks
+
+| Module | Feature | Provides |
+|--------|---------|----------|
+| `webhook` | `webhooks` | Standard Webhooks `WebhookSigner` / `WebhookVerifier` (timestamp tolerance, several secrets for rotation), `WebhookReplayGuard` |
+| `webhook_delivery` | `webhook-delivery` | `WebhookDelivery`: signed outbound POSTs with exponential backoff and jitter, a `DeadLetterSink`, and an `EgressPolicy` that refuses internal destinations at resolve time |
+| `queue_source` | — | `QueueSource` (pull, ack, nack), `InMemoryQueueSource`, and `QueueIngress`, which enqueues each message as a durable run keyed by its message id and acks only after the enqueue succeeds |
+
+`queue_source_conformance_tests!` (feature `conformance`) checks any `QueueSource`. See
+[Wake-ups and Webhooks](../docs/official_docs/core/wake-ups.md).
 
 ## Run Budgets
 

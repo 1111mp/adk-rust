@@ -14,6 +14,8 @@ Welcome to the official documentation for ADK-Rust (Agent Development Kit for Ru
 - [Core Types](core/core.md) - Fundamental types: Content, Part, Agent trait, Tool trait, contexts
 - [Runner](core/runner.md) - Agent execution runtime and configuration
 - [Plugins](core/plugins.md) - Lifecycle hooks for tool/model interception and middleware
+- [Durable Runtime](core/durable-runtime.md) - Leases with fencing, the durable run queue, schedules, governance state, and agent identity
+- [Wake-ups and Webhooks](core/wake-ups.md) - Signed inbound webhooks and queue messages that enqueue durable runs, and signed outbound delivery
 
 ## Models
 
@@ -29,6 +31,7 @@ Welcome to the official documentation for ADK-Rust (Agent Development Kit for Ru
 - [Workflow Agents](agents/workflow-agents.md) - Deterministic agents: Sequential, Parallel, Loop
 - [Multi-Agent Systems](agents/multi-agent.md) - Building agent hierarchies with sub-agents
 - [Graph Agents](agents/graph-agents.md) - LangGraph-style workflow orchestration
+- [Graph Checkpointing](agents/graph-checkpointing.md) - Checkpointer backends, the version rule, durability modes, pending writes, and the conformance suite
 - [Realtime Agents](agents/realtime-agents.md) - Voice-enabled agents with OpenAI/Gemini
 
 ## Coding Agent
@@ -137,7 +140,10 @@ Long-term memory that outlives a session — the persistent counterpart to sessi
 - [Memory](security/memory.md) - Long-term semantic memory for agents
 - [Payments and Commerce](security/payments.md) - Agentic commerce journeys, protocol support, and validation paths
 - [Spend Ledger](security/spend-ledger.md) - One budget for model calls and payments, with daily, monthly, and lifetime caps
+- [Approval Service](security/approval-service.md) - Approval inbox with quorum, delegation, escalation, expiry, webhooks, and server endpoints
+- [Agent Identity](security/agent-identity.md) - Stable agent ids on every policy decision, approval, spend record, and audit event; resource-scoped credential brokers
 - [Durable Stores](security/durable-stores.md) - Spend ledger, action ledger, and approval store backends, their conformance suite, and the no-duplicate guarantee
+- [Audit Log](security/audit-log.md) - Signed, Merkle-hashed audit log with checkpoints, key rotation, and offline verification
 
 ## Compliance
 

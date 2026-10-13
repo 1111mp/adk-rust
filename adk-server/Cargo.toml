@@ -58,9 +58,6 @@ hmac = { version = "0.12", optional = true }
 sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 
-# Optional: background run and cron scheduling
-cron = { version = "0.15", optional = true }
-
 [features]
 default = []
 a2a-v1 = ["dep:a2a-protocol-types"]
@@ -72,8 +69,12 @@ agent-registry = []
 a2a-interceptors = []
 # Enable OpenAI webhook handler for background task completion events
 openai-webhooks = ["dep:hmac", "dep:sha2", "dep:hex"]
+# Signed inbound webhooks (`POST /hooks/{name}`) that enqueue durable runs
+webhook-ingress = ["adk-core/webhooks"]
 # Enable background run endpoints and cron job management
-background = ["dep:cron"]
+background = ["adk-core/cron"]
+# Approval inbox endpoints, the approval ticker, and the signed approval webhook notifier
+approvals = ["adk-core/webhook-delivery"]
 # Enable the Gemini Enterprise Agent Platform (ReasoningEngine) dispatch surface
 # and the turnkey serve_agent_engine entrypoint (tokio/net for the listener)
 agent-engine = ["dep:adk-memory", "tokio/net"]
@@ -88,6 +89,8 @@ vertex-remote-engine = [
 ]
 
 [dev-dependencies]
+adk-graph = { path = "../adk-graph" }
+adk-session = { path = "../adk-session", features = ["sqlite", "postgres"] }
 async-stream.workspace = true
 tracing-subscriber = "0.3"
 uuid = { version = "1.23", features = ["v4"] }

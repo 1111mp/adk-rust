@@ -41,6 +41,7 @@
 //! - Artifact handling
 //! - Plugin hooks for every model and tool call (with the `plugins` feature)
 
+mod acting;
 mod agent_invoker;
 pub mod builder;
 mod cache;
@@ -59,7 +60,7 @@ pub use builder::RunnerConfigBuilder;
 pub use context::{InvocationContext, MutableSession};
 pub use launcher::Launcher;
 pub use runner::{Runner, RunnerConfig, RunnerInvocation};
-pub use spend::{LlmSpendEstimate, LlmSpendRecorder};
+pub use spend::LlmSpendEstimate;
 
 // Re-export RequestContext for convenience
 pub use adk_core::RequestContext;

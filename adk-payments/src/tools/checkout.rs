@@ -26,6 +26,7 @@ use crate::kernel::commands::{
 };
 use crate::kernel::service::MerchantCheckoutService;
 use crate::kernel::{GovernedCheckoutService, PaymentApproval, PaymentApprover, PaymentCaller};
+use adk_core::audit_log::AuditActor;
 
 use super::{caller_identity, calling_agent};
 
@@ -178,6 +179,7 @@ impl PaymentApprover for ToolCallApprover {
             tool_name: self.tool_name.clone(),
             function_call_id: Some(call_id.clone()),
             args: self.args.clone(),
+            acting: Some(Box::new(self.ctx.acting_context())),
         };
         if let Some(config) = self.ctx.run_config() {
             let bound =
@@ -205,12 +207,19 @@ pub(super) fn tool_caller(
     tool_name: &str,
     args: Value,
 ) -> PaymentCaller {
-    let mut caller =
-        PaymentCaller::new().with_org(ctx.app_name()).with_agent(ctx.agent_name()).with_approver(
-            Arc::new(ToolCallApprover { ctx: ctx.clone(), tool_name: tool_name.to_string(), args }),
-        );
+    let mut caller = PaymentCaller::new()
+        .with_org(ctx.app_name())
+        .with_agent(ctx.acting_context().agent.id.as_str())
+        .with_approver(Arc::new(ToolCallApprover {
+            ctx: ctx.clone(),
+            tool_name: tool_name.to_string(),
+            args,
+        }));
     if let Some(ledger) = ctx.run_config().and_then(|config| config.spend_ledger.clone()) {
         caller = caller.with_spend_ledger(ledger);
+    }
+    if let Some(trail) = ctx.run_config().and_then(|config| config.audit.clone()) {
+        caller = caller.with_audit(trail, AuditActor::for_context(ctx.as_ref()));
     }
     caller
 }

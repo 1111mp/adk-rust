@@ -417,6 +417,21 @@ impl PromptConfig {
                     .iter()
                     .any(|part| !matches!(part, Part::Text { text } if text.trim().is_empty()))
         });
+        // Without its empty turn, a resuming run whose model already answered after the
+        // held call would end on a model message, which providers read as a prefill and
+        // models without prefill support (Anthropic's newer ones) reject.
+        let empty_turn = current_user_content
+            .parts
+            .iter()
+            .all(|part| matches!(part, Part::Text { text } if text.trim().is_empty()));
+        if empty_turn
+            && session_history.last().is_some_and(|last| {
+                last.role == "model"
+                    && !last.parts.iter().any(|part| matches!(part, Part::FunctionCall { .. }))
+            })
+        {
+            session_history.push(Content::new("user").with_text(RESUMED_TURN_NOTE));
+        }
 
         Ok(match self.include_contents {
             adk_core::IncludeContents::None => {
@@ -430,6 +445,11 @@ impl PromptConfig {
         })
     }
 }
+
+/// The user turn a run without user input sends when the conversation would otherwise
+/// end on a model message.
+const RESUMED_TURN_NOTE: &str =
+    "(No new message from the user. Continue from the tool results above.)";
 
 struct ToolSetup {
     tools: Vec<Arc<dyn Tool>>,
@@ -1709,6 +1729,10 @@ impl ReadonlyContext for AgentToolContext {
     fn user_content(&self) -> &Content {
         self.parent_ctx.user_content()
     }
+
+    fn acting_context(&self) -> adk_core::ActingContext {
+        self.parent_ctx.acting_context()
+    }
 }
 
 #[async_trait]
@@ -1857,6 +1881,10 @@ impl ReadonlyContext for ToolOutcomeCallbackContext {
 
     fn user_content(&self) -> &Content {
         self.inner.user_content()
+    }
+
+    fn acting_context(&self) -> adk_core::ActingContext {
+        self.inner.acting_context()
     }
 }
 
@@ -2327,13 +2355,13 @@ impl ToolExecutor<'_> {
                 // that exists answers the call; a ledger that cannot be read or written
                 // fails the call closed.
                 let ledgered = match crate::tool_ledger::begin_ledgered_call(
-                    self.ctx.run_config(),
+                    self.ctx.as_ref(),
                     effect,
                     tool_ctx.idempotency_key(),
                     &name,
                     &final_args,
                 )
-                .await
+                .await?
                 {
                     Ok(ledgered) => ledgered,
                     Err(answer) => {
@@ -2461,6 +2489,15 @@ impl ToolExecutor<'_> {
                 }
 
                 let outcome_unknown = interrupted && effect == ToolEffect::NonIdempotent;
+                if outcome_unknown {
+                    crate::tool_ledger::record_outcome_unknown(
+                        self.ctx.as_ref(),
+                        &name,
+                        &final_args,
+                        "interrupted",
+                    )
+                    .await?;
+                }
                 // A call that ended mid-flight keeps its begun record, so a replay is answered
                 // with an unknown outcome instead of executing again.
                 if let Some(ledgered) = ledgered
@@ -2762,6 +2799,8 @@ impl Agent for LlmAgent {
     )]
     async fn run(&self, ctx: Arc<dyn InvocationContext>) -> Result<adk_core::EventStream> {
         adk_telemetry::info!("Starting agent execution");
+        // Under a workflow or team parent, the agent still acts as itself.
+        let ctx = crate::acting_agent_context::ActingAgentContext::scope(ctx, &self.name);
         let ctx = Self::apply_input_guardrails(ctx, self.input_guardrails.clone()).await?;
 
         let agent_name = self.name.clone();
@@ -3247,25 +3286,28 @@ impl Agent for LlmAgent {
                     let should_stream_to_client = matches!(streaming_mode, StreamingMode::SSE | StreamingMode::Bidi)
                         && output_guardrails.is_empty();
 
-                    // Reserve the call against the run budget before it starts. The meter
-                    // records the call's usage once, from its first non-partial response
-                    // carrying usage, so partial chunks never inflate the totals.
-                    let mut call_meter = match budget_tracker.as_ref() {
-                        Some(tracker) => match tracker.begin_model_call(model.name()) {
-                            Ok(meter) => Some(meter),
-                            Err(exceeded) => {
-                                yield Err(exceeded.into());
-                                return;
-                            }
-                        },
-                        None => None,
-                    };
-
+                    // Reserves the call's upper-bound cost in the spend ledger and one model
+                    // call in the run budget before it starts; the stream records the call's
+                    // usage once, from its first non-partial response carrying usage, and
+                    // commits its cost. A refusal stops the run before anything is sent.
+                    let call_scope = adk_core::ModelCallScope::for_run(
+                        ctx.run_config(),
+                        ctx.app_name(),
+                        &agent_name,
+                    );
+                    let call_metered = call_scope.budget().is_some();
                     // Always use streaming internally for LLM calls
-                    let mut response_stream = model
-                        .generate_content(request, true)
+                    let mut response_stream = match call_scope
+                        .generate(model.as_ref(), request, true)
                         .instrument(llm_span.clone())
-                        .await?;
+                        .await
+                    {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            yield Err(error);
+                            return;
+                        }
+                    };
 
                     use futures::StreamExt;
 
@@ -3292,11 +3334,6 @@ impl Agent for LlmAgent {
                                 return;
                             }
                         };
-                        // Budgets count what the provider reported, before callbacks edit it.
-                        if let Some(meter) = call_meter.as_mut() {
-                            meter.observe(&chunk);
-                        }
-
                         // ===== AFTER MODEL CALLBACKS (per chunk) =====
                         // Callbacks can modify each streaming chunk
                         for callback in
@@ -3354,7 +3391,7 @@ impl Agent for LlmAgent {
                                 &chunk,
                                 long_running_tool_ids,
                             );
-                            if call_meter.is_some() {
+                            if call_metered {
                                 event.provider_metadata.insert(
                                     adk_core::BUDGET_RECORDED_KEY.to_string(),
                                     "true".to_string(),
@@ -3405,8 +3442,7 @@ impl Agent for LlmAgent {
                     // A stream that ended without a non-partial usage report is settled
                     // here, before any tool runs, from the best usage it carried.
                     drop(response_stream);
-                    let metered = call_meter.is_some();
-                    drop(call_meter);
+                    let metered = call_metered;
 
                     // For None mode: yield single final event with accumulated content
                     if !should_stream_to_client {

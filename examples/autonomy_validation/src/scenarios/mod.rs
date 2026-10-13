@@ -1,21 +1,26 @@
-//! One module per Phase 0 and Phase 1 area; each scenario returns a
+//! One module per Phase 0, Phase 1, and Phase 2 area; each scenario returns a
 //! [`Verdict`](crate::common::Verdict).
 
 pub mod anthropic;
 pub mod ap2;
+pub mod approvals;
+pub mod audit;
 pub mod budget;
 pub mod builtin;
 pub mod codeact;
 pub mod commerce;
+pub mod durable;
 pub mod eval;
 pub mod governance;
 pub mod graph;
+pub mod identity;
 pub mod mcp;
 pub mod payments;
 pub mod policy;
 pub mod providers;
 pub mod state;
 pub mod transfer;
+pub mod wakeup;
 
 use crate::common::{Config, Provider, Verdict};
 use governance::DenialForm;
@@ -44,6 +49,11 @@ pub const ALL: &[&str] = &[
     "openai_tools_routing",
     "anthropic_thinking_replay",
     "builtin_tool_policy",
+    "durable_crash_resume",
+    "approval_service",
+    "audit_trail",
+    "agent_identity",
+    "webhook_wakeup",
 ];
 
 /// Runs the named scenario once.
@@ -75,6 +85,11 @@ pub async fn run(name: &str, cfg: &Config, provider: Provider) -> Verdict {
         "openai_tools_routing" => providers::openai_tools_routing(cfg, provider).await,
         "anthropic_thinking_replay" => providers::anthropic_thinking_replay(cfg, provider).await,
         "builtin_tool_policy" => builtin::builtin_tool_policy(cfg, provider).await,
+        "durable_crash_resume" => durable::durable_crash_resume(cfg, provider).await,
+        "approval_service" => approvals::approval_service(cfg, provider).await,
+        "audit_trail" => audit::audit_trail(cfg, provider).await,
+        "agent_identity" => identity::agent_identity(cfg, provider).await,
+        "webhook_wakeup" => wakeup::webhook_wakeup(cfg, provider).await,
         other => Verdict::Fail(format!("unknown scenario {other}")),
     }
 }

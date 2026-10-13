@@ -27,7 +27,10 @@ callback rewrites. It returns one of:
 `DeclarativePolicy` matches rules in order. A rule names a tool glob (`*` and `?`), may require
 the effect the tool declares (`read_only_tools()`, or `with_effect(ToolEffect::Idempotent)` — see
 [Tool Effects](../tools/tool-effects.md)), and may add argument predicates addressed by JSON
-pointer. The first matching rule decides; a call no rule matches is **denied by default**.
+pointer. A rule may also be restricted to the acting agent: `for_agent(glob)` matches its
+`AgentId`, `for_tenant(tenant)` and `for_class(class)` match its principal (see
+[Agent Identity](agent-identity.md)); such a rule never matches a call without an acting context.
+The first matching rule decides; a call no rule matches is **denied by default**.
 
 | Predicate | Holds when |
 |-----------|------------|
@@ -64,7 +67,21 @@ let runner = Runner::builder()
 The runner installs its policy on every run that does not carry one in its `RunConfig`. Implement
 `ToolPolicy` directly for decisions that need outside data; `ToolPolicyRequest` carries the tool
 name, final arguments, declared `ToolEffect` (`Tool::effect()`), agent name, app, user, session,
-and invocation ID.
+invocation ID, and the `ActingContext` (`acting`: the agent's principal, the subject it acts for,
+and its delegation chain). A call held for approval records the same acting context on its
+`ToolConfirmationRequest::acting`.
+
+```rust
+use adk_core::{DeclarativePolicy, PolicyRule};
+
+let policy = DeclarativePolicy::builder()
+    // A quarantined agent may call nothing.
+    .rule(PolicyRule::deny("*", "agent under review").for_agent("spiffe://acme.example/agent/legacy-*"))
+    // Only release bots of the acme tenant deploy.
+    .rule(PolicyRule::allow("deploy").for_tenant("acme").for_class("release-bot"))
+    .allow_read_only()
+    .build();
+```
 
 ## Built-in Tools
 
@@ -294,6 +311,17 @@ keep requests across restarts and share them between processes — `SqliteApprov
 `PostgresApprovalStore`, `RedisApprovalStore`, `MongoApprovalStore`, `Neo4jApprovalStore`,
 and `FirestoreApprovalStore` — each passing the same conformance suite. Install one with
 `Runner::builder().approval_store(...)`. See [Durable Stores](durable-stores.md).
+
+### Approval Service
+
+For approvals that need an inbox — several approvers, a quorum, delegation, escalation,
+expiry, notifications, or HTTP endpoints — set `RunConfig::approval_service` to a
+`StoreApprovalService` over the store. A held call is then also submitted as an
+`ApprovalRequest` under the service's routing policy, and the decision that resolves it is
+written to the store, where the next run takes it. An approver may edit the arguments; the
+edited call is a new call and passes the `ToolPolicy` and the tool screen again before it
+executes. A rejection or response is reported to the model as the call's refusal. See
+[Approval Service](approval-service.md).
 
 ### Decisions Keyed by Call ID
 
@@ -931,9 +959,21 @@ scheduling. See [Server](../deployment/server.md#kill-switch).
 Realtime tool calls go through the same governed path — see
 [Realtime Tools](../realtime/tools.md#the-governed-path).
 
+## Audit Records
+
+`Runner::builder().audit_log(recorder)` makes the governed path record each decision before
+it takes effect: a call allowed, denied (by the policy, a guardrail, a confirmation, or the
+kill switch), or held for approval, and each approval decision with its source. A call whose
+record cannot be written is not executed under the default `AuditFailureMode::Block`.
+`freeze_recorded` and `unfreeze_recorded` record kill-switch changes with the acting
+administrator. See [Audit Log](audit-log.md#what-the-runtime-records).
+
 ## Related
 
+- [Audit Log](audit-log.md) — Signed records of every governed decision
+
 - [Access Control](access-control.md) — RBAC, SSO, audit logging
+- [Agent Identity](agent-identity.md) — the acting agent behind every decision
 - [Callbacks](../callbacks/callbacks.md) — All callback types and lifecycle
 - [Graph Agents](../agents/graph-agents.md) — Checkpoint-based interrupts
 - [Guardrails](guardrails.md) — Input/output validation

@@ -139,6 +139,12 @@ pub struct AuditEvent {
     /// SHA-256 hash of the previous event (for cryptographic chaining).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prev_hash: Option<String>,
+    /// Stable id of the agent that acted ([`AgentId`](adk_core::AgentId)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// The person or service the agent acted for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_behalf_of: Option<adk_core::SubjectRef>,
 }
 
 impl AuditEvent {
@@ -164,6 +170,8 @@ impl AuditEvent {
             resource_id: None,
             action: None,
             prev_hash: None,
+            agent_id: None,
+            on_behalf_of: None,
         }
     }
 
@@ -250,6 +258,39 @@ impl AuditEvent {
         self
     }
 
+    /// Set the acting agent's id.
+    pub fn with_agent_id(mut self, agent_id: impl Into<String>) -> Self {
+        self.agent_id = Some(agent_id.into());
+        self
+    }
+
+    /// Records the acting agent, the subject it acted for, and its tenant.
+    ///
+    /// Sets [`agent_id`](Self::agent_id) and [`on_behalf_of`](Self::on_behalf_of), and
+    /// [`tenant_id`](Self::tenant_id) from the principal's tenant when no tenant is set.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use adk_auth::{AuditEvent, AuditOutcome};
+    /// use adk_core::{ActingContext, SubjectRef};
+    ///
+    /// let acting =
+    ///     ActingContext::derived("shop", "cashier", "alice", adk_core::SubjectKind::Human);
+    /// let event = AuditEvent::tool_access("alice", "refund", AuditOutcome::Allowed)
+    ///     .with_acting_context(&acting);
+    /// assert_eq!(event.agent_id.as_deref(), Some("urn:adk:agent:shop/cashier"));
+    /// assert_eq!(event.on_behalf_of, Some(SubjectRef::human("alice")));
+    /// ```
+    pub fn with_acting_context(mut self, acting: &adk_core::ActingContext) -> Self {
+        self.agent_id = Some(acting.agent.id.to_string());
+        self.on_behalf_of = acting.on_behalf_of.clone();
+        if self.tenant_id.is_none() {
+            self.tenant_id = acting.agent.tenant.clone();
+        }
+        self
+    }
+
     /// Set action verb.
     pub fn with_action(mut self, action: impl Into<String>) -> Self {
         self.action = Some(action.into());
@@ -300,6 +341,9 @@ pub struct AuditFilter {
     /// Filter by resource UUID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_id: Option<String>,
+    /// Filter by acting agent id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     /// Events after this timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<DateTime<Utc>>,
@@ -349,6 +393,11 @@ impl AuditFilter {
         }
         if let Some(ref rid) = self.resource_id
             && event.resource_id.as_ref() != Some(rid)
+        {
+            return false;
+        }
+        if let Some(ref agent) = self.agent_id
+            && event.agent_id.as_ref() != Some(agent)
         {
             return false;
         }
@@ -411,18 +460,37 @@ pub trait AuditSink: Send + Sync {
     }
 }
 
+/// A shared sink is a sink, so one sink (such as a signed audit log) can serve several
+/// guards and keep a handle for checkpoints or queries.
+#[async_trait::async_trait]
+impl<T: AuditSink + ?Sized> AuditSink for std::sync::Arc<T> {
+    async fn log(&self, event: AuditEvent) -> Result<(), crate::AuthError> {
+        (**self).log(event).await
+    }
+
+    async fn log_batch(&self, events: Vec<AuditEvent>) -> Result<(), crate::AuthError> {
+        (**self).log_batch(events).await
+    }
+
+    async fn query(&self, filter: &AuditFilter) -> Result<Vec<AuditEvent>, crate::AuthError> {
+        (**self).query(filter).await
+    }
+
+    async fn purge_before(&self, cutoff: DateTime<Utc>) -> Result<u64, crate::AuthError> {
+        (**self).purge_before(cutoff).await
+    }
+
+    async fn flush(&self) -> Result<(), crate::AuthError> {
+        (**self).flush().await
+    }
+}
+
 /// What a guarded tool does when its audit sink fails to record an access decision.
 ///
 /// [`ProtectedTool`](crate::ProtectedTool), [`ScopedTool`](crate::ScopedTool), and the
-/// guards that build them default to [`Block`](Self::Block).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AuditFailureMode {
-    /// Refuse the call: an action whose decision cannot be recorded does not run.
-    #[default]
-    Block,
-    /// Log the failure and apply the access decision without a record.
-    Warn,
-}
+/// guards that build them default to [`Block`](AuditFailureMode::Block). The same type
+/// governs the runtime's [`AuditTrail`](adk_core::audit_log::AuditTrail).
+pub use adk_core::audit_log::AuditFailureMode;
 
 /// Records one access decision, refusing the call when the sink fails in `Block` mode.
 pub(crate) async fn record_decision(
