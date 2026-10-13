@@ -299,6 +299,12 @@ cargo run --example auth_google --features sso  # Google Identity
 - Token revocation and blacklist checks are not built in. If you need immediate revocation, enforce it in a custom `TokenValidator` or request extractor.
 - `JwtValidator` rejects symmetric algorithms (HS256/HS384/HS512) and EdDSA — only RSA and EC algorithms are supported with JWKS-based validation.
 
+## SQLx compatibility
+
+ADK-Rust 3.0 SQL database APIs use SQLx 0.9 pool and error types. Applications
+sharing pools must also use SQLx 0.9. See the [migration guide](../docs/official_docs/migration/sqlx-0.9.md)
+for runtime/TLS flags and migration-input requirements.
+
 ## License
 
 Apache-2.0
@@ -306,9 +312,3 @@ Apache-2.0
 ## Part of ADK-Rust
 
 This crate is part of the [ADK-Rust](https://adk-rust.com) framework for building AI agents in Rust.
-
-## SQLx compatibility
-
-ADK-Rust 3.0 SQL database APIs use SQLx 0.9 pool and error types. Applications
-sharing pools must also use SQLx 0.9. See the [migration guide](../docs/official_docs/migration/sqlx-0.9.md)
-for runtime/TLS flags and migration-input requirements.
